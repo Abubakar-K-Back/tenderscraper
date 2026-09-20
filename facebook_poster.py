@@ -82,21 +82,6 @@ def extract_fields(tender: dict) -> dict:
     bid_validity = detail.get("Bid Validity", "N/A")
     bidding_method = detail.get("Procurement Procedure", "N/A")
 
-    location_parts = [
-        detail.get("Office Name") or tender.get("organization", ""),
-        detail.get("Office Address", ""),
-        detail.get("City") or tender.get("location", ""),
-    ]
-    location = ", ".join(p for p in location_parts if p)
-
-    contact_bits = []
-    if detail.get("Contact Person"):
-        contact_bits.append(detail["Contact Person"])
-    reach = [v for v in [detail.get("Contact Email"), detail.get("Contact Phone")] if v]
-    if reach:
-        contact_bits.append(" / ".join(reach))
-    inquiries = " | ".join(contact_bits)
-
     return {
         "city": city,
         "department": department,
@@ -107,8 +92,6 @@ def extract_fields(tender: dict) -> dict:
         "bid_security": bid_security,
         "bid_validity": bid_validity,
         "bidding_method": bidding_method,
-        "location": location,
-        "inquiries": inquiries,
     }
 
 
@@ -129,9 +112,6 @@ def format_tender_message(tender: dict) -> str:
     - Bid Validity: [...]
     - Bidding Method: [...]
     ----------------------------------------
-
-    Location: [Office Name, Address, City]
-    Inquiries: [Contact Person] | [Email / Phone]
 
     Full Details & Documents:
     [link]
@@ -155,13 +135,9 @@ def format_tender_message(tender: dict) -> str:
         f"- Bidding Method: {f['bidding_method']}",
         SEPARATOR,
         "",
-        f"Location: {f['location']}",
+        "Full Details & Documents:",
+        shorten_url(tender.get("detail_url", "")),
     ]
-    if f["inquiries"]:
-        lines.append(f"Inquiries: {f['inquiries']}")
-    lines.append("")
-    lines.append("Full Details & Documents:")
-    lines.append(shorten_url(tender.get("detail_url", "")))
 
     return "\n".join(lines)
 

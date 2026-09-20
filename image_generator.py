@@ -83,7 +83,7 @@ def generate_tender_image(tender: dict, output_path: str) -> str:
     title_y0 = TOP_PAD
     rule_y = title_y0 + TITLE_BLOCK_H + 26
     rows_y0 = rule_y + 2 + 26
-    rows_h = ROW_H * 3
+    rows_h = ROW_H * 2
     footer_y0 = rows_y0 + rows_h + 30
     canvas_h = footer_y0 + FOOTER_H
 
@@ -128,11 +128,9 @@ def generate_tender_image(tender: dict, output_path: str) -> str:
     col_width = (CANVAS_W - MARGIN * 2) // 2
     grid = [
         ("DEPARTMENT", fields["department"] or "N/A"),
-        ("CLOSING DATE", fields["deadline"] or "N/A"),
-        ("TENDER NO", tender["tender_no"]),
+        ("SUBMISSION DEADLINE", fields["deadline"] or "N/A"),
         ("BID SECURITY", fields["bid_security"]),
         ("BID VALIDITY", fields["bid_validity"]),
-        ("STATUS", fields["status_label"]),
     ]
     for i, (label, value) in enumerate(grid):
         row, col = divmod(i, 2)
