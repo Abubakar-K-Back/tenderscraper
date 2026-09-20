@@ -1,0 +1,12 @@
+services:
+  tender-poster:
+    build: .
+    container_name: tender-poster
+    env_file:
+      - .env
+    environment:
+      - RUN_TIME=09:00
+      - TZ=Asia/Karachi
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped

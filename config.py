@@ -20,4 +20,7 @@ FB_GRAPH_API_VERSION = "v21.0"
 
 PAGES_TO_SCRAPE = int(os.getenv("PAGES_TO_SCRAPE", "2"))
 MAX_POSTS_PER_RUN = int(os.getenv("MAX_POSTS_PER_RUN", "15"))
-POST_DELAY_SECONDS = int(os.getenv("POST_DELAY_SECONDS", "8"))
+POST_DELAY_SECONDS = int(os.getenv("POST_DELAY_SECONDS", "1200"))
+
+# Daily run time (24h HH:MM, container-local time) used by scheduler.py.
+RUN_TIME = os.getenv("RUN_TIME", "09:00")

@@ -72,7 +72,15 @@ review while the app is in Development mode.
 | `FB_PAGE_ACCESS_TOKEN`  | Long-lived Page access token (see above)             |
 | `PAGES_TO_SCRAPE`       | Listing pages to scrape per run (50 tenders/page)    |
 | `MAX_POSTS_PER_RUN`     | Safety cap on posts per run                          |
-| `POST_DELAY_SECONDS`    | Delay between consecutive FB posts                   |
+| `POST_DELAY_SECONDS`    | Delay between consecutive FB posts (default: 1200 = 20 min) |
+| `RUN_TIME`              | Daily run time, `HH:MM` container-local time (Docker scheduler only) |
+
+> **Why the 20-minute delay?** A brand-new Page with no followers can get its
+> posts silently hidden by Facebook's spam/integrity system if you publish
+> many near-identical items in quick succession — this happened during
+> testing (15 posts in ~3 minutes all got auto-hidden, visible only via the
+> Graph API, not to the public). Spacing posts minutes apart looks far more
+> natural and also fits a "tender alert" page better than a burst-post.
 
 ## Usage
 
@@ -87,9 +95,30 @@ python main.py
 python main.py --pages 3
 ```
 
-## Scheduling
+## Running with Docker (recommended)
 
-Once credentials are confirmed working, run this daily via cron, e.g.:
+```bash
+cp .env.example .env   # fill in FB_PAGE_ID / FB_PAGE_ACCESS_TOKEN
+
+# Start the self-scheduling container (runs daily at RUN_TIME, default 09:00
+# Asia/Karachi time; keeps running in the background)
+docker compose up -d
+
+docker compose logs -f     # watch it
+docker compose down        # stop it
+
+# One-off manual runs (build the image first with `docker compose build` if needed)
+docker compose run --rm tender-poster python main.py --dry-run
+docker compose run --rm tender-poster python main.py
+```
+
+The SQLite dedup DB is bind-mounted to `./data/tenders.db` on the host, so it
+persists across container rebuilds/restarts. Credentials come from `.env` via
+`env_file` in `docker-compose.yml` — they are never baked into the image.
+
+## Scheduling (without Docker)
+
+If you'd rather not use Docker, run this daily via cron instead:
 
 ```
 0 9 * * * cd /home/abubakar-khalid/scrapperr && .venv/bin/python main.py >> data/run.log 2>&1
