@@ -65,11 +65,6 @@ def extract_fields(tender: dict) -> dict:
 
     department = detail.get("Organization Name") or tender.get("organization", "")
 
-    ref_no = detail.get("Tender No / Reference No / Tender Inquiry No")
-    tender_ref = tender["tender_no"]
-    if ref_no and ref_no != tender["tender_no"]:
-        tender_ref += f" / {ref_no}"
-
     category = detail.get("Procurement Category") or tender.get("category", "") or "N/A"
 
     deadline = tender.get("closing_date", "")
@@ -85,7 +80,6 @@ def extract_fields(tender: dict) -> dict:
     return {
         "city": city,
         "department": department,
-        "tender_ref": tender_ref,
         "category": category,
         "status_label": _status_label(tender.get("status", "")),
         "deadline": deadline,
@@ -102,7 +96,6 @@ def format_tender_message(tender: dict) -> str:
 
     Project: [Project / Tender Title]
     Department: [Organization / Authority Name]
-    Tender Ref / TS No: [Reference Numbers]
     Category: [...]
     Status: [...]
     ----------------------------------------
@@ -113,7 +106,7 @@ def format_tender_message(tender: dict) -> str:
     - Bidding Method: [...]
     ----------------------------------------
 
-    Full Details & Documents:
+    Full Details:
     [link]
     """
     f = extract_fields(tender)
@@ -123,7 +116,6 @@ def format_tender_message(tender: dict) -> str:
         "",
         f"Project: {_truncate(tender['title'].strip(), MAX_TITLE_LENGTH)}",
         f"Department: {f['department']}",
-        f"Tender Ref / TS No: {f['tender_ref']}",
         f"Category: {f['category']}",
         f"Status: {f['status_label']}",
         "",
@@ -135,7 +127,7 @@ def format_tender_message(tender: dict) -> str:
         f"- Bidding Method: {f['bidding_method']}",
         SEPARATOR,
         "",
-        "Full Details & Documents:",
+        "Full Details:",
         shorten_url(tender.get("detail_url", "")),
     ]
 

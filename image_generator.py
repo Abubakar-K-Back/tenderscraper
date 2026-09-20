@@ -10,19 +10,17 @@ BG_COLOR = (250, 249, 246)
 NAVY = (11, 27, 58)
 GOLD = (170, 125, 40)
 VALUE_COLOR = (40, 40, 45)
-FOOTER_TEXT_COLOR = NAVY
 
 FONT_DIR = "/usr/share/fonts/truetype/dejavu"
 FONT_BOLD = os.path.join(FONT_DIR, "DejaVuSans-Bold.ttf")
 FONT_REGULAR = os.path.join(FONT_DIR, "DejaVuSans.ttf")
 
 MARGIN = 60
-FOOTER_TEXT = "New Govt Tenders Posted Daily"
 
 TOP_PAD = 50
 TITLE_BLOCK_H = 220
 ROW_H = 100
-FOOTER_H = 70
+BOTTOM_PAD = 50
 
 
 def _font(path: str, size: int) -> ImageFont.FreeTypeFont:
@@ -84,8 +82,7 @@ def generate_tender_image(tender: dict, output_path: str) -> str:
     rule_y = title_y0 + TITLE_BLOCK_H + 26
     rows_y0 = rule_y + 2 + 26
     rows_h = ROW_H * 2
-    footer_y0 = rows_y0 + rows_h + 30
-    canvas_h = footer_y0 + FOOTER_H
+    canvas_h = rows_y0 + rows_h + BOTTOM_PAD
 
     img = Image.new("RGB", (CANVAS_W, canvas_h), BG_COLOR)
     draw = ImageDraw.Draw(img)
@@ -139,18 +136,6 @@ def generate_tender_image(tender: dict, output_path: str) -> str:
         draw.text((x, yy), label, font=label_font, fill=GOLD)
         value_line = _truncate_to_width(draw, value, value_font, col_width - 30)
         draw.text((x, yy + 32), value_line, font=value_font, fill=VALUE_COLOR)
-
-    # Footer bar
-    draw.rectangle([0, footer_y0, CANVAS_W, canvas_h], fill=GOLD)
-    footer_font = _font(FONT_BOLD, 20)
-    fbbox = draw.textbbox((0, 0), FOOTER_TEXT, font=footer_font)
-    text_w = fbbox[2] - fbbox[0]
-    draw.text(
-        ((CANVAS_W - text_w) / 2, footer_y0 + (FOOTER_H - (fbbox[3] - fbbox[1])) / 2 - fbbox[1]),
-        FOOTER_TEXT,
-        font=footer_font,
-        fill=FOOTER_TEXT_COLOR,
-    )
 
     img.save(output_path, "PNG")
     return output_path
