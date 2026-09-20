@@ -17,10 +17,12 @@ FONT_REGULAR = os.path.join(FONT_DIR, "DejaVuSans.ttf")
 
 MARGIN = 60
 
-TOP_PAD = 50
+TOP_PAD = 26
 TITLE_BLOCK_H = 220
-ROW_H = 100
 BOTTOM_PAD = 50
+
+WATERMARK_TEXT = "PAKISTAN TENDER ALERTS"
+WATERMARK_COLOR = (160, 160, 162)
 
 
 def _font(path: str, size: int) -> ImageFont.FreeTypeFont:
@@ -67,25 +69,73 @@ def _fit_title(draw, text, max_width, max_height, max_lines=3, start_size=44, mi
     return font, lines, line_height
 
 
-def _truncate_to_width(draw, text, font, max_width):
-    if _text_width(draw, text, font) <= max_width:
-        return text
-    while text and _text_width(draw, text + "…", font) > max_width:
-        text = text[:-1]
-    return text.rstrip() + "…"
+def _fit_value(draw, text, max_width, max_lines=2, start_size=32, min_size=18):
+    """Wraps a value onto up to `max_lines`, shrinking the font first rather
+    than truncating, so long department names etc. still read in full."""
+    size = start_size
+    while size >= min_size:
+        font = _font(FONT_REGULAR, size)
+        lines = _wrap_text(draw, text, font, max_width)
+        if len(lines) <= max_lines:
+            return font, lines, int(size * 1.25)
+        size -= 2
+
+    font = _font(FONT_REGULAR, min_size)
+    lines = _wrap_text(draw, text, font, max_width)
+    if len(lines) > max_lines:
+        lines = lines[:max_lines]
+        last = lines[-1]
+        while last and _text_width(draw, last + "…", font) > max_width:
+            last = last[:-1]
+        lines[-1] = last.rstrip() + "…"
+    return font, lines, int(min_size * 1.25)
 
 
 def generate_tender_image(tender: dict, output_path: str) -> str:
     fields = facebook_poster.extract_fields(tender)
 
-    title_y0 = TOP_PAD
+    # First pass on a throwaway canvas to measure the watermark height.
+    probe = Image.new("RGB", (CANVAS_W, 10), BG_COLOR)
+    probe_draw = ImageDraw.Draw(probe)
+    watermark_font = _font(FONT_BOLD, 16)
+    watermark_bbox = probe_draw.textbbox((MARGIN, TOP_PAD), WATERMARK_TEXT, font=watermark_font)
+
+    title_y0 = watermark_bbox[3] + 26
     rule_y = title_y0 + TITLE_BLOCK_H + 26
     rows_y0 = rule_y + 2 + 26
-    rows_h = ROW_H * 2
-    canvas_h = rows_y0 + rows_h + BOTTOM_PAD
+
+    col_width = (CANVAS_W - MARGIN * 2) // 2
+    label_font = _font(FONT_BOLD, 20)
+    grid = [
+        ("DEPARTMENT", fields["department"] or "N/A"),
+        ("SUBMISSION DEADLINE", fields["deadline"] or "N/A"),
+        ("BID SECURITY", fields["bid_security"]),
+        ("BID VALIDITY", fields["bid_validity"]),
+    ]
+
+    # Pre-compute each field's fitted font/lines so row heights can flex to
+    # fit whichever of the two columns in that row needs more room.
+    fitted = [
+        _fit_value(probe_draw, value, col_width - 30) for _, value in grid
+    ]
+
+    row_gap = 30
+    row_positions = []
+    y_cursor = rows_y0
+    for row_idx in range(0, len(grid), 2):
+        row_fields = fitted[row_idx:row_idx + 2]
+        row_content_h = max(32 + line_height * len(lines) for _, lines, line_height in row_fields)
+        row_positions.append(y_cursor)
+        y_cursor += row_content_h + row_gap
+    rows_bottom = y_cursor - row_gap
+
+    canvas_h = rows_bottom + BOTTOM_PAD
 
     img = Image.new("RGB", (CANVAS_W, canvas_h), BG_COLOR)
     draw = ImageDraw.Draw(img)
+
+    # Subtle brand watermark, top-left
+    draw.text((MARGIN, TOP_PAD), WATERMARK_TEXT, font=watermark_font, fill=WATERMARK_COLOR)
 
     # Category pill, top-right
     category_text = (fields["category"] or "TENDER").upper()
@@ -96,7 +146,7 @@ def generate_tender_image(tender: dict, output_path: str) -> str:
     pill_h = (bbox[3] - bbox[1]) + pad_y * 2
     pill_x1 = CANVAS_W - MARGIN
     pill_x0 = pill_x1 - pill_w
-    pill_y0 = title_y0 - 6
+    pill_y0 = TOP_PAD - 4
     pill_y1 = pill_y0 + pill_h
     draw.rounded_rectangle(
         [pill_x0, pill_y0, pill_x1, pill_y1], radius=pill_h // 2, outline=GOLD, width=2
@@ -112,30 +162,24 @@ def generate_tender_image(tender: dict, output_path: str) -> str:
     title_max_width = CANVAS_W - MARGIN * 2
     font, lines, line_height = _fit_title(draw, tender["title"].strip(), title_max_width, TITLE_BLOCK_H)
     total_height = line_height * len(lines)
-    y = title_y0 + pill_h + 20 + max(0, (TITLE_BLOCK_H - pill_h - 20 - total_height) // 2)
+    y = title_y0 + max(0, (TITLE_BLOCK_H - total_height) // 2)
     for line in lines:
         draw.text((MARGIN, y), line, font=font, fill=NAVY)
         y += line_height
 
     draw.line([(MARGIN, rule_y), (CANVAS_W - MARGIN, rule_y)], fill=GOLD, width=2)
 
-    # Key info, enlarged: 2 columns x 3 rows so each field has room to breathe
-    label_font = _font(FONT_BOLD, 20)
-    value_font = _font(FONT_REGULAR, 32)
-    col_width = (CANVAS_W - MARGIN * 2) // 2
-    grid = [
-        ("DEPARTMENT", fields["department"] or "N/A"),
-        ("SUBMISSION DEADLINE", fields["deadline"] or "N/A"),
-        ("BID SECURITY", fields["bid_security"]),
-        ("BID VALIDITY", fields["bid_validity"]),
-    ]
+    # Key info, 2 columns x 2 rows, each value auto-wrapped/shrunk to fit
     for i, (label, value) in enumerate(grid):
         row, col = divmod(i, 2)
         x = MARGIN + col * col_width
-        yy = rows_y0 + row * ROW_H
+        yy = row_positions[row]
         draw.text((x, yy), label, font=label_font, fill=GOLD)
-        value_line = _truncate_to_width(draw, value, value_font, col_width - 30)
-        draw.text((x, yy + 32), value_line, font=value_font, fill=VALUE_COLOR)
+        value_font, value_lines, value_line_height = fitted[i]
+        vy = yy + 32
+        for line in value_lines:
+            draw.text((x, vy), line, font=value_font, fill=VALUE_COLOR)
+            vy += value_line_height
 
     img.save(output_path, "PNG")
     return output_path
