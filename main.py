@@ -1,9 +1,12 @@
 import argparse
 import logging
+import tempfile
 import time
+from pathlib import Path
 
 import config
 import facebook_poster
+import image_generator
 import scraper
 import storage
 
@@ -62,15 +65,23 @@ def run(dry_run: bool = False, pages: int = None):
         message = facebook_poster.format_tender_message(tender)
 
         if dry_run:
-            logger.info("[DRY RUN] Would post:\n%s\n", message)
+            preview_path = config.DATA_DIR / f"preview_{tender['tender_no']}.png"
+            image_generator.generate_tender_image(tender, str(preview_path))
+            logger.info(
+                "[DRY RUN] Would post (image saved to %s):\n%s\n", preview_path, message
+            )
             continue
 
-        try:
-            facebook_poster.post_to_page(message)
-            storage.mark_posted(tender["tender_no"], tender["title"])
-        except facebook_poster.FacebookPostError:
-            logger.exception("Failed to post tender %s", tender["tender_no"])
-            continue
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            image_path = str(Path(tmp_dir) / f"{tender['tender_no']}.png")
+            image_generator.generate_tender_image(tender, image_path)
+
+            try:
+                facebook_poster.post_photo_to_page(image_path, message)
+                storage.mark_posted(tender["tender_no"], tender["title"])
+            except facebook_poster.FacebookPostError:
+                logger.exception("Failed to post tender %s", tender["tender_no"])
+                continue
 
         if i < len(new_tenders) - 1:
             time.sleep(config.POST_DELAY_SECONDS)

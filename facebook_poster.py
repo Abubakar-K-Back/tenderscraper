@@ -53,34 +53,12 @@ def _status_label(status_raw: str) -> str:
     return "Active"
 
 
-def format_tender_message(tender: dict) -> str:
-    """Formal tender-notice template:
-
-    TENDER NOTICE: [City / Region]
-
-    Project: [Project / Tender Title]
-    Department: [Organization / Authority Name]
-    Tender Ref / TS No: [Reference Numbers]
-    Category: [...]
-    Status: [...]
-    ----------------------------------------
-    KEY DETAILS
-    - Submission Deadline: [...]
-    - Bid Security: [...]
-    - Bid Validity: [...]
-    - Bidding Method: [...]
-    ----------------------------------------
-
-    Location: [Office Name, Address, City]
-    Inquiries: [Contact Person] | [Email / Phone]
-
-    Full Details & Documents:
-    [link]
-
-    `detail` fields come from the tender's detail page (scraper.fetch_tender_detail);
-    fields the site doesn't have for a given tender (conditional sections) fall
-    back to "N/A" so the notice keeps a consistent shape.
-    """
+def extract_fields(tender: dict) -> dict:
+    """Derive all the display fields used by both the text notice and the
+    generated image, from the listing row plus the tender's detail page
+    (scraper.fetch_tender_detail). Fields the site doesn't have for a given
+    tender (conditional sections) fall back to "N/A" / empty so callers get
+    a consistent shape."""
     detail = tender.get("detail_fields") or {}
 
     city = detail.get("City") or tender.get("location", "").split(" - ")[0].strip()
@@ -119,27 +97,68 @@ def format_tender_message(tender: dict) -> str:
         contact_bits.append(" / ".join(reach))
     inquiries = " | ".join(contact_bits)
 
+    return {
+        "city": city,
+        "department": department,
+        "tender_ref": tender_ref,
+        "category": category,
+        "status_label": _status_label(tender.get("status", "")),
+        "deadline": deadline,
+        "bid_security": bid_security,
+        "bid_validity": bid_validity,
+        "bidding_method": bidding_method,
+        "location": location,
+        "inquiries": inquiries,
+    }
+
+
+def format_tender_message(tender: dict) -> str:
+    """Formal tender-notice template:
+
+    TENDER NOTICE: [City / Region]
+
+    Project: [Project / Tender Title]
+    Department: [Organization / Authority Name]
+    Tender Ref / TS No: [Reference Numbers]
+    Category: [...]
+    Status: [...]
+    ----------------------------------------
+    KEY DETAILS
+    - Submission Deadline: [...]
+    - Bid Security: [...]
+    - Bid Validity: [...]
+    - Bidding Method: [...]
+    ----------------------------------------
+
+    Location: [Office Name, Address, City]
+    Inquiries: [Contact Person] | [Email / Phone]
+
+    Full Details & Documents:
+    [link]
+    """
+    f = extract_fields(tender)
+
     lines = [
-        f"TENDER NOTICE: {city}",
+        f"TENDER NOTICE: {f['city']}",
         "",
         f"Project: {_truncate(tender['title'].strip(), MAX_TITLE_LENGTH)}",
-        f"Department: {department}",
-        f"Tender Ref / TS No: {tender_ref}",
-        f"Category: {category}",
-        f"Status: {_status_label(tender.get('status', ''))}",
+        f"Department: {f['department']}",
+        f"Tender Ref / TS No: {f['tender_ref']}",
+        f"Category: {f['category']}",
+        f"Status: {f['status_label']}",
         "",
         SEPARATOR,
         "KEY DETAILS",
-        f"- Submission Deadline: {deadline}",
-        f"- Bid Security: {bid_security}",
-        f"- Bid Validity: {bid_validity}",
-        f"- Bidding Method: {bidding_method}",
+        f"- Submission Deadline: {f['deadline']}",
+        f"- Bid Security: {f['bid_security']}",
+        f"- Bid Validity: {f['bid_validity']}",
+        f"- Bidding Method: {f['bidding_method']}",
         SEPARATOR,
         "",
-        f"Location: {location}",
+        f"Location: {f['location']}",
     ]
-    if inquiries:
-        lines.append(f"Inquiries: {inquiries}")
+    if f["inquiries"]:
+        lines.append(f"Inquiries: {f['inquiries']}")
     lines.append("")
     lines.append("Full Details & Documents:")
     lines.append(shorten_url(tender.get("detail_url", "")))
@@ -170,4 +189,28 @@ def post_to_page(message: str) -> dict:
         )
 
     logger.info("Posted to Facebook, post id: %s", data.get("id"))
+    return data
+
+
+def post_photo_to_page(image_path: str, caption: str) -> dict:
+    if not config.FB_PAGE_ID or not config.FB_PAGE_ACCESS_TOKEN:
+        raise FacebookPostError(
+            "FB_PAGE_ID / FB_PAGE_ACCESS_TOKEN not configured. See .env.example."
+        )
+
+    url = f"https://graph.facebook.com/{config.FB_GRAPH_API_VERSION}/{config.FB_PAGE_ID}/photos"
+    with open(image_path, "rb") as image_file:
+        files = {"source": image_file}
+        payload = {"caption": caption, "access_token": config.FB_PAGE_ACCESS_TOKEN}
+        response = requests.post(url, data=payload, files=files, timeout=60)
+
+    data = response.json()
+    if response.status_code != 200 or "error" in data:
+        error = data.get("error", {})
+        raise FacebookPostError(
+            f"Facebook API error ({response.status_code}): "
+            f"{error.get('message', response.text)}"
+        )
+
+    logger.info("Posted photo to Facebook, post id: %s", data.get("post_id") or data.get("id"))
     return data
