@@ -4,17 +4,15 @@ from PIL import Image, ImageDraw, ImageFont
 
 import facebook_poster
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-BANNER_PATH = os.path.join(BASE_DIR, "assets", "banner.png")
-
 CANVAS_W = 1200
 
-# Brand colors sampled from assets/banner.png so the generated section below
-# the banner matches it seamlessly.
+BG_COLOR = (250, 249, 246)
 NAVY = (11, 27, 58)
 GREEN = (6, 74, 34)
-GOLD = (191, 145, 50)
-TEXT_COLOR = (255, 255, 255)
+GOLD = (170, 125, 40)
+MUTED = (110, 110, 115)
+VALUE_COLOR = (40, 40, 45)
+RULE_LIGHT = (225, 222, 215)
 FOOTER_TEXT_COLOR = NAVY
 
 FONT_DIR = "/usr/share/fonts/truetype/dejavu"
@@ -22,16 +20,13 @@ FONT_BOLD = os.path.join(FONT_DIR, "DejaVuSans-Bold.ttf")
 FONT_REGULAR = os.path.join(FONT_DIR, "DejaVuSans.ttf")
 
 MARGIN = 60
+WORDMARK_NAVY = "PAKISTAN TENDER "
+WORDMARK_GREEN = "ALERTS"
+TAGLINE = "Daily Public & Private Procurement Updates | Federal & Provincial PPRA"
 FOOTER_TEXT = "New Govt Tenders Posted Daily"
 
-PAD_AFTER_BANNER = 36
 TITLE_BLOCK_H = 220
-GAP_AFTER_TITLE = 26
-DIVIDER_H = 2
-GAP_AFTER_DIVIDER = 22
-ROW_H = 62
 FOOTER_H = 70
-GAP_BEFORE_FOOTER = 30
 
 
 def _font(path: str, size: int) -> ImageFont.FreeTypeFont:
@@ -86,30 +81,53 @@ def _truncate_to_width(draw, text, font, max_width):
     return text.rstrip() + "…"
 
 
-def _load_banner():
-    banner = Image.open(BANNER_PATH).convert("RGB")
-    scale = CANVAS_W / banner.width
-    return banner.resize((CANVAS_W, int(banner.height * scale)))
+def _draw_header(draw) -> int:
+    """Draws the two-tone wordmark, gold rule and tagline. Returns the y
+    position where content below the header should start."""
+    wordmark_font = _font(FONT_BOLD, 40)
+    y = 46
+
+    navy_w = _text_width(draw, WORDMARK_NAVY, wordmark_font)
+    draw.text((MARGIN, y), WORDMARK_NAVY, font=wordmark_font, fill=NAVY)
+    draw.text((MARGIN + navy_w, y), WORDMARK_GREEN, font=wordmark_font, fill=GREEN)
+
+    bbox = draw.textbbox((MARGIN, y), WORDMARK_NAVY + WORDMARK_GREEN, font=wordmark_font)
+    wordmark_bottom = bbox[3]
+    wordmark_width = bbox[2] - MARGIN
+
+    rule_y = wordmark_bottom + 14
+    draw.line([(MARGIN, rule_y), (MARGIN + wordmark_width, rule_y)], fill=GOLD, width=3)
+
+    tagline_font = _font(FONT_REGULAR, 20)
+    tagline_y = rule_y + 16
+    draw.text((MARGIN, tagline_y), TAGLINE, font=tagline_font, fill=MUTED)
+    tagline_bbox = draw.textbbox((MARGIN, tagline_y), TAGLINE, font=tagline_font)
+
+    return tagline_bbox[3] + 30
 
 
 def generate_tender_image(tender: dict, output_path: str) -> str:
     fields = facebook_poster.extract_fields(tender)
 
-    banner = _load_banner()
-    banner_h = banner.height
+    # First pass on a throwaway canvas just to measure the header height.
+    probe = Image.new("RGB", (CANVAS_W, 10), BG_COLOR)
+    probe_draw = ImageDraw.Draw(probe)
+    header_bottom = _draw_header(probe_draw)
 
-    title_y0 = banner_h + PAD_AFTER_BANNER
-    divider_y = title_y0 + TITLE_BLOCK_H + GAP_AFTER_TITLE
-    rows_y0 = divider_y + DIVIDER_H + GAP_AFTER_DIVIDER
-    rows_h = ROW_H * 2
-    footer_y0 = rows_y0 + rows_h + GAP_BEFORE_FOOTER
+    title_y0 = header_bottom + 10
+    rule_y = title_y0 + TITLE_BLOCK_H + 26
+    rows_y0 = rule_y + 2 + 22
+    row_h = 62
+    rows_h = row_h * 2
+    footer_y0 = rows_y0 + rows_h + 30
     canvas_h = footer_y0 + FOOTER_H
 
-    img = Image.new("RGB", (CANVAS_W, canvas_h), NAVY)
-    img.paste(banner, (0, 0))
+    img = Image.new("RGB", (CANVAS_W, canvas_h), BG_COLOR)
     draw = ImageDraw.Draw(img)
+    _draw_header(draw)
+    draw.line([(MARGIN, header_bottom - 20), (CANVAS_W - MARGIN, header_bottom - 20)], fill=RULE_LIGHT, width=1)
 
-    # Category pill, top-right of the info section
+    # Category pill, top-right
     category_text = (fields["category"] or "TENDER").upper()
     pill_font = _font(FONT_BOLD, 18)
     pad_x, pad_y = 16, 8
@@ -118,7 +136,7 @@ def generate_tender_image(tender: dict, output_path: str) -> str:
     pill_h = (bbox[3] - bbox[1]) + pad_y * 2
     pill_x1 = CANVAS_W - MARGIN
     pill_x0 = pill_x1 - pill_w
-    pill_y0 = title_y0 - pill_h - 10
+    pill_y0 = title_y0 - pill_h - 6
     pill_y1 = pill_y0 + pill_h
     draw.rounded_rectangle(
         [pill_x0, pill_y0, pill_x1, pill_y1], radius=pill_h // 2, outline=GOLD, width=2
@@ -136,12 +154,12 @@ def generate_tender_image(tender: dict, output_path: str) -> str:
     total_height = line_height * len(lines)
     y = title_y0 + max(0, (TITLE_BLOCK_H - total_height) // 2)
     for line in lines:
-        draw.text((MARGIN, y), line, font=font, fill=TEXT_COLOR)
+        draw.text((MARGIN, y), line, font=font, fill=NAVY)
         y += line_height
 
-    draw.line([(MARGIN, divider_y), (CANVAS_W - MARGIN, divider_y)], fill=GOLD, width=2)
+    draw.line([(MARGIN, rule_y), (CANVAS_W - MARGIN, rule_y)], fill=GOLD, width=2)
 
-    # Key info, 2 rows x 3 columns: the "major information" at a glance
+    # Key info, 2 rows x 3 columns
     label_font = _font(FONT_BOLD, 14)
     value_font = _font(FONT_REGULAR, 19)
     col_width = (CANVAS_W - MARGIN * 2) // 3
@@ -156,10 +174,10 @@ def generate_tender_image(tender: dict, output_path: str) -> str:
     for i, (label, value) in enumerate(grid):
         row, col = divmod(i, 3)
         x = MARGIN + col * col_width
-        y = rows_y0 + row * ROW_H
-        draw.text((x, y), label, font=label_font, fill=GOLD)
+        yy = rows_y0 + row * row_h
+        draw.text((x, yy), label, font=label_font, fill=GOLD)
         value_line = _truncate_to_width(draw, value, value_font, col_width - 20)
-        draw.text((x, y + 22), value_line, font=value_font, fill=TEXT_COLOR)
+        draw.text((x, yy + 22), value_line, font=value_font, fill=VALUE_COLOR)
 
     # Footer bar
     draw.rectangle([0, footer_y0, CANVAS_W, canvas_h], fill=GOLD)
