@@ -1,6 +1,4 @@
 import logging
-import re
-from datetime import date, datetime
 
 import requests
 
@@ -9,24 +7,11 @@ import config
 logger = logging.getLogger(__name__)
 
 MAX_TITLE_LENGTH = 140
-
-_BOLD_MAP = {}
-for i, c in enumerate("ABCDEFGHIJKLMNOPQRSTUVWXYZ"):
-    _BOLD_MAP[c] = chr(0x1D5D4 + i)
-for i, c in enumerate("abcdefghijklmnopqrstuvwxyz"):
-    _BOLD_MAP[c] = chr(0x1D5EE + i)
-for i, c in enumerate("0123456789"):
-    _BOLD_MAP[c] = chr(0x1D7EC + i)
+SEPARATOR = "-" * 40
 
 
 class FacebookPostError(Exception):
     pass
-
-
-def to_bold_unicode(text: str) -> str:
-    """Render ASCII letters/digits as Unicode bold so it stands out on Facebook,
-    which doesn't support markdown."""
-    return "".join(_BOLD_MAP.get(ch, ch) for ch in text)
 
 
 def _truncate(text: str, max_len: int) -> str:
@@ -38,59 +23,104 @@ def _truncate(text: str, max_len: int) -> str:
     return text[:cutoff].rstrip(",.;- ") + "…"
 
 
-def _days_left(closing_date: str):
-    try:
-        closing = datetime.strptime(closing_date, "%b %d, %Y").date()
-    except ValueError:
-        return None
-    return (closing - date.today()).days
-
-
-def _category_hashtag(category: str) -> str:
-    return "#" + re.sub(r"[^A-Za-z0-9]", "", category)
+def _status_label(status_raw: str) -> str:
+    if "Corrigendum" in status_raw:
+        return "Corrigendum Issued"
+    if "Cancelled" in status_raw:
+        return "Cancelled"
+    return "Active"
 
 
 def format_tender_message(tender: dict) -> str:
-    title = _truncate(tender["title"].strip(), MAX_TITLE_LENGTH)
+    """Formal tender-notice template:
+
+    TENDER NOTICE: [City / Region]
+
+    Project: [Project / Tender Title]
+    Department: [Organization / Authority Name]
+    Tender Ref / TS No: [Reference Numbers]
+    Category: [...]
+    Status: [...]
+    ----------------------------------------
+    KEY DETAILS
+    - Submission Deadline: [...]
+    - Bid Security: [...]
+    - Bid Validity: [...]
+    - Bidding Method: [...]
+    ----------------------------------------
+
+    Location: [Office Name, Address, City]
+    Inquiries: [Contact Person] | [Email / Phone]
+
+    Full Details & Documents:
+    [link]
+
+    `detail` fields come from the tender's detail page (scraper.fetch_tender_detail);
+    fields the site doesn't have for a given tender (conditional sections) fall
+    back to "N/A" so the notice keeps a consistent shape.
+    """
+    detail = tender.get("detail_fields") or {}
+
+    city = detail.get("City") or tender.get("location", "").split(" - ")[0].strip()
+
+    department = detail.get("Organization Name") or tender.get("organization", "")
+
+    ref_no = detail.get("Tender No / Reference No / Tender Inquiry No")
+    tender_ref = tender["tender_no"]
+    if ref_no and ref_no != tender["tender_no"]:
+        tender_ref += f" / {ref_no}"
+
+    category = detail.get("Procurement Category") or tender.get("category", "") or "N/A"
+
+    deadline = tender.get("closing_date", "")
+    if tender.get("closing_time"):
+        deadline += f" at {tender['closing_time']}"
+
+    bid_security = detail.get("Bid Security")
+    bid_security = f"PKR {bid_security}" if bid_security else "N/A"
+
+    bid_validity = detail.get("Bid Validity", "N/A")
+    bidding_method = detail.get("Procurement Procedure", "N/A")
+
+    location_parts = [
+        detail.get("Office Name") or tender.get("organization", ""),
+        detail.get("Office Address", ""),
+        detail.get("City") or tender.get("location", ""),
+    ]
+    location = ", ".join(p for p in location_parts if p)
+
+    contact_bits = []
+    if detail.get("Contact Person"):
+        contact_bits.append(detail["Contact Person"])
+    reach = [v for v in [detail.get("Contact Email"), detail.get("Contact Phone")] if v]
+    if reach:
+        contact_bits.append(" / ".join(reach))
+    inquiries = " | ".join(contact_bits)
 
     lines = [
-        "🆕 NEW TENDER ALERT",
+        f"TENDER NOTICE: {city}",
         "",
-        to_bold_unicode(title),
+        f"Project: {_truncate(tender['title'].strip(), MAX_TITLE_LENGTH)}",
+        f"Department: {department}",
+        f"Tender Ref / TS No: {tender_ref}",
+        f"Category: {category}",
+        f"Status: {_status_label(tender.get('status', ''))}",
         "",
+        SEPARATOR,
+        "KEY DETAILS",
+        f"- Submission Deadline: {deadline}",
+        f"- Bid Security: {bid_security}",
+        f"- Bid Validity: {bid_validity}",
+        f"- Bidding Method: {bidding_method}",
+        SEPARATOR,
+        "",
+        f"Location: {location}",
     ]
-
-    info_lines = []
-    if tender.get("organization"):
-        info_lines.append(f"🏛️ {tender['organization']}")
-    if tender.get("location"):
-        info_lines.append(f"📍 {tender['location']}")
-    if tender.get("category"):
-        info_lines.append(f"🏷️ {tender['category']}")
-    if info_lines:
-        lines.extend(info_lines)
-        lines.append("")
-
-    if tender.get("closing_date"):
-        closing = f"⏳ Closing: {tender['closing_date']}"
-        if tender.get("closing_time"):
-            closing += f" at {tender['closing_time']}"
-        days_left = _days_left(tender["closing_date"])
-        if days_left is not None and days_left >= 0:
-            day_word = "day" if days_left == 1 else "days"
-            closing += f"  ({days_left} {day_word} left)"
-        lines.append(closing)
-        lines.append("")
-
-    lines.append(f"🆔 Tender No: {tender['tender_no']}")
-    if tender.get("detail_url"):
-        lines.append(f"🔗 Full details & documents: {tender['detail_url']}")
-
-    hashtags = ["#PPRA", "#GovtTenders", "#Pakistan"]
-    if tender.get("category"):
-        hashtags.append(_category_hashtag(tender["category"]))
+    if inquiries:
+        lines.append(f"Inquiries: {inquiries}")
     lines.append("")
-    lines.append(" ".join(hashtags))
+    lines.append("Full Details & Documents:")
+    lines.append(tender.get("detail_url", ""))
 
     return "\n".join(lines)
 

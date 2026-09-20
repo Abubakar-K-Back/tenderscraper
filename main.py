@@ -50,6 +50,15 @@ def run(dry_run: bool = False, pages: int = None):
         new_tenders = new_tenders[: config.MAX_POSTS_PER_RUN]
 
     for i, tender in enumerate(new_tenders):
+        try:
+            tender["detail_fields"] = scraper.fetch_tender_detail(tender["tender_no"])
+        except scraper.ScrapeError:
+            logger.exception(
+                "Failed to fetch detail page for %s, posting with listing-only fields",
+                tender["tender_no"],
+            )
+            tender["detail_fields"] = {}
+
         message = facebook_poster.format_tender_message(tender)
 
         if dry_run:

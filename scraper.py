@@ -137,3 +137,39 @@ def scrape_active_tenders(num_pages: int = None):
             break
         all_tenders.extend(tenders)
     return all_tenders
+
+
+def fetch_tender_detail_html(tender_no: str) -> str:
+    url = f"{config.SITE_BASE_URL}/public/tenders/tender-details/{tender_no}"
+    response = requests.get(url, headers=HEADERS, timeout=30)
+    if response.status_code != 200:
+        raise ScrapeError(
+            f"Unexpected status {response.status_code} fetching detail for {tender_no}"
+        )
+    return response.text
+
+
+def parse_tender_detail(html: str) -> dict:
+    """Parse the label/value rows on a tender's detail page (Organization/Office
+    Details, Tender Information, Important Dates, Financial Information, etc).
+    Every row on that page follows the same `.detail-label` + value-span pattern,
+    so this stays generic instead of hardcoding each section."""
+    soup = BeautifulSoup(html, "html.parser")
+    fields = {}
+    for item in soup.select(".list-group-item"):
+        label_el = item.find(class_="detail-label")
+        if not label_el:
+            continue
+        label = label_el.get_text(strip=True).rstrip(":")
+        value_el = label_el.find_next_sibling()
+        if value_el is None:
+            continue
+        value = value_el.get_text(" ", strip=True)
+        if value:
+            fields[label] = value
+    return fields
+
+
+def fetch_tender_detail(tender_no: str) -> dict:
+    html = fetch_tender_detail_html(tender_no)
+    return parse_tender_detail(html)
