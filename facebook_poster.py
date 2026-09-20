@@ -23,6 +23,28 @@ def _truncate(text: str, max_len: int) -> str:
     return text[:cutoff].rstrip(",.;- ") + "…"
 
 
+def shorten_url(url: str, attempts: int = 2) -> str:
+    """Shorten via TinyURL (free, no API key). Retries once since free
+    shortener endpoints occasionally hiccup, and falls back to the original
+    URL if it still fails, so a link is never dropped."""
+    if not url:
+        return url
+    for attempt in range(attempts):
+        try:
+            response = requests.get(
+                "https://tinyurl.com/api-create.php",
+                params={"url": url},
+                timeout=10,
+            )
+            short = response.text.strip()
+            if response.status_code == 200 and short.startswith("http"):
+                return short
+        except requests.RequestException:
+            pass
+    logger.warning("URL shortening failed for %s, using original URL", url)
+    return url
+
+
 def _status_label(status_raw: str) -> str:
     if "Corrigendum" in status_raw:
         return "Corrigendum Issued"
@@ -120,7 +142,7 @@ def format_tender_message(tender: dict) -> str:
         lines.append(f"Inquiries: {inquiries}")
     lines.append("")
     lines.append("Full Details & Documents:")
-    lines.append(tender.get("detail_url", ""))
+    lines.append(shorten_url(tender.get("detail_url", "")))
 
     return "\n".join(lines)
 
