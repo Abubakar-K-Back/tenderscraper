@@ -52,13 +52,8 @@ _ENABLED_NICHES_RAW = os.getenv("ENABLED_NICHES", "civil_works,health,ict")
 ENABLED_NICHES = [n.strip() for n in _ENABLED_NICHES_RAW.split(",") if n.strip()]
 
 MAX_DIGEST_POSTS_PER_DAY = int(os.getenv("MAX_DIGEST_POSTS_PER_DAY", "3"))
-DIGEST_MAX_ITEMS = int(os.getenv("DIGEST_MAX_ITEMS", "8"))
-
-SPOTLIGHT_ENABLED = os.getenv("SPOTLIGHT_ENABLED", "true").lower() in (
-    "1",
-    "true",
-    "yes",
-)
+# Hard cap per digest image + caption (keeps cards readable on mobile).
+DIGEST_MAX_ITEMS = int(os.getenv("DIGEST_MAX_ITEMS", "5"))
 
 POST_DELAY_SECONDS = int(os.getenv("POST_DELAY_SECONDS", "3600"))
 RUN_TIME = os.getenv("RUN_TIME", "09:00")

@@ -80,7 +80,6 @@ def run(dry_run: bool = False, pages: int = None):
 
     _enrich_details(new_tenders)
 
-    # Outside the shortlist: mark posted silently so they do not clog every run.
     out_of_niche = []
     in_scope = []
     for tender in new_tenders:
@@ -108,9 +107,6 @@ def run(dry_run: bool = False, pages: int = None):
         logger.info("No digest groups to post")
         return
 
-    # Tenders in niches that did not win a digest slot today stay unposted
-    # for the next run. Everything in selected digests gets posted (and marked).
-    selected_tenders = [t for _, group in digest_groups for t in group]
     selected_ids = {nid for nid, _ in digest_groups}
     deferred = sum(len(grouped[nid]) for nid in grouped if nid not in selected_ids)
     if deferred:
@@ -120,17 +116,31 @@ def run(dry_run: bool = False, pages: int = None):
             config.MAX_DIGEST_POSTS_PER_DAY,
         )
 
-    spotlight = niches.pick_spotlight(selected_tenders)
-    posts_remaining = len(digest_groups) + (1 if spotlight else 0)
+    posts_remaining = len(digest_groups)
 
     with tempfile.TemporaryDirectory() as tmp_dir:
         tmp = Path(tmp_dir)
 
         for niche_id, group in digest_groups:
+            # Cap what goes on the image/caption; mark the whole niche group seen
+            # so a 100+ backlog never floods one post.
+            shown = group[: config.DIGEST_MAX_ITEMS]
+            overflow = len(group) - len(shown)
+            if overflow:
+                logger.info(
+                    "%s: posting %d of %d tenders (%d marked seen without listing)",
+                    niche_id,
+                    len(shown),
+                    len(group),
+                    overflow,
+                )
+
             label = niches.niche_label(niche_id)
             image_path = str(tmp / f"digest_{niche_id}.png")
-            image_generator.generate_digest_image(label, group, image_path)
-            message = facebook_poster.format_digest_message(label, group)
+            image_generator.generate_digest_image(
+                label, shown, image_path, niche_id=niche_id
+            )
+            message = facebook_poster.format_digest_message(label, shown)
 
             ok = _post_photo(
                 image_path,
@@ -144,30 +154,10 @@ def run(dry_run: bool = False, pages: int = None):
             posts_remaining -= 1
             _sleep_between(posts_remaining)
 
-        if spotlight:
-            image_path = str(tmp / f"spotlight_{spotlight['tender_no']}.png")
-            image_generator.generate_tender_image(spotlight, image_path)
-            message = facebook_poster.format_tender_message(spotlight, spotlight=True)
-            ok = _post_photo(
-                image_path,
-                message,
-                dry_run=dry_run,
-                preview_name=f"preview_spotlight_{spotlight['tender_no']}.png",
-            )
-            # Spotlight tender is already in a digest group and marked there.
-            if not ok:
-                logger.warning(
-                    "Spotlight post failed for %s (already included in digest)",
-                    spotlight["tender_no"],
-                )
-
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description=(
-            "Scrape PPRA active tenders and post niche digests + one spotlight "
-            "to Facebook."
-        )
+        description="Scrape PPRA active tenders and post niche digests to Facebook."
     )
     parser.add_argument(
         "--dry-run",

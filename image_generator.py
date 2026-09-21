@@ -1,4 +1,4 @@
-"""Square Facebook cards: navy header, gold accents, readable on a phone feed."""
+"""Square Facebook digest cards with rotating themes."""
 
 import os
 from datetime import datetime
@@ -8,18 +8,67 @@ from PIL import Image, ImageDraw, ImageFont
 import facebook_poster
 
 CANVAS = 1080
-
-NAVY = (12, 28, 58)
-GOLD = (201, 154, 62)
-GOLD_SOFT = (232, 208, 150)
-CREAM = (247, 244, 238)
 WHITE = (255, 255, 255)
 INK = (28, 32, 40)
-MUTED = (98, 104, 116)
-CARD = (255, 255, 255)
-CARD_LINE = (230, 224, 212)
-
 BRAND = "PAKISTAN TENDER ALERTS"
+
+# Rotating palettes — picked by niche + day so posts are not always the same navy.
+THEMES = [
+    {
+        "name": "navy_gold",
+        "primary": (12, 28, 58),
+        "accent": (201, 154, 62),
+        "accent_soft": (232, 208, 150),
+        "bg": (247, 244, 238),
+        "card_line": (230, 224, 212),
+        "muted": (98, 104, 116),
+    },
+    {
+        "name": "teal_sand",
+        "primary": (15, 61, 62),
+        "accent": (212, 163, 115),
+        "accent_soft": (235, 210, 180),
+        "bg": (245, 242, 236),
+        "card_line": (222, 216, 205),
+        "muted": (95, 105, 105),
+    },
+    {
+        "name": "forest_amber",
+        "primary": (28, 48, 36),
+        "accent": (196, 149, 58),
+        "accent_soft": (230, 208, 150),
+        "bg": (246, 245, 240),
+        "card_line": (220, 222, 210),
+        "muted": (100, 108, 100),
+    },
+    {
+        "name": "wine_rose",
+        "primary": (64, 28, 40),
+        "accent": (196, 120, 110),
+        "accent_soft": (232, 190, 182),
+        "bg": (248, 243, 241),
+        "card_line": (230, 218, 214),
+        "muted": (110, 95, 98),
+    },
+    {
+        "name": "slate_sky",
+        "primary": (30, 41, 59),
+        "accent": (96, 165, 250),
+        "accent_soft": (186, 214, 250),
+        "bg": (241, 245, 249),
+        "card_line": (210, 220, 230),
+        "muted": (100, 110, 125),
+    },
+    {
+        "name": "charcoal_lime",
+        "primary": (24, 24, 27),
+        "accent": (163, 230, 53),
+        "accent_soft": (210, 240, 150),
+        "bg": (250, 250, 249),
+        "card_line": (228, 228, 231),
+        "muted": (113, 113, 122),
+    },
+]
 
 FONT_DIR = "/usr/share/fonts/truetype/dejavu"
 FONT_BOLD = os.path.join(FONT_DIR, "DejaVuSans-Bold.ttf")
@@ -79,157 +128,24 @@ def _wrap_text(draw: ImageDraw.ImageDraw, text: str, font, max_width: int):
     return lines or [""]
 
 
-def _fit_title(draw, text, max_width, max_height, max_lines=3, start_size=42, min_size=24):
-    size = start_size
-    while size >= min_size:
-        font = _font(FONT_BOLD, size)
-        lines = _wrap_text(draw, text, font, max_width)
-        line_height = int(size * 1.22)
-        if len(lines) <= max_lines and line_height * len(lines) <= max_height:
-            return font, lines, line_height
-        size -= 2
-
-    font = _font(FONT_BOLD, min_size)
-    lines = _wrap_text(draw, text, font, max_width)
-    line_height = int(min_size * 1.22)
-    if len(lines) > max_lines:
-        lines = lines[:max_lines]
-        lines[-1] = lines[-1].rstrip(",.;- ") + "…"
-    return font, lines, line_height
+def _ellipsis(draw, text, font, max_width):
+    text = (text or "").strip()
+    if _text_width(draw, text, font) <= max_width:
+        return text
+    while text and _text_width(draw, text + "…", font) > max_width:
+        text = text[:-1]
+    return text.rstrip(",.;- ") + "…"
 
 
-def _fit_value(draw, text, max_width, max_lines=2, start_size=26, min_size=16):
-    size = start_size
-    while size >= min_size:
-        font = _font(FONT_REGULAR, size)
-        lines = _wrap_text(draw, text, font, max_width)
-        if len(lines) <= max_lines:
-            return font, lines, int(size * 1.22)
-        size -= 2
-
-    font = _font(FONT_REGULAR, min_size)
-    lines = _wrap_text(draw, text, font, max_width)
-    if len(lines) > max_lines:
-        lines = lines[:max_lines]
-        last = lines[-1]
-        while last and _text_width(draw, last + "…", font) > max_width:
-            last = last[:-1]
-        lines[-1] = last.rstrip() + "…"
-    return font, lines, int(min_size * 1.22)
-
-
-def _draw_header(draw, width, height, right_label=""):
-    draw.rectangle([0, 0, width, height], fill=NAVY)
-    draw.rectangle([0, height - 6, width, height], fill=GOLD)
-
-    brand_font = _font(FONT_BOLD, 18)
-    draw.text((48, 28), BRAND, font=brand_font, fill=GOLD_SOFT)
-
-    if right_label:
-        pill_font = _font(FONT_BOLD, 16)
-        pad_x, pad_y = 16, 8
-        bbox = draw.textbbox((0, 0), right_label, font=pill_font)
-        tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
-        pw, ph = tw + pad_x * 2, th + pad_y * 2
-        x1 = width - 48
-        x0 = x1 - pw
-        y0 = 22
-        y1 = y0 + ph
-        draw.rounded_rectangle([x0, y0, x1, y1], radius=ph // 2, fill=GOLD)
-        draw.text((x0 + pad_x, y0 + pad_y - bbox[1]), right_label, font=pill_font, fill=NAVY)
-
-
-def _draw_footer(draw, y, width, text):
-    draw.rectangle([0, y, width, CANVAS], fill=NAVY)
-    font = _font(FONT_REGULAR, 18)
-    bbox = draw.textbbox((0, 0), text, font=font)
-    tw = bbox[2] - bbox[0]
-    draw.text(((width - tw) // 2, y + 22), text, font=font, fill=GOLD_SOFT)
-
-
-def generate_tender_image(tender: dict, output_path: str) -> str:
-    fields = facebook_poster.extract_fields(tender)
-    img = Image.new("RGB", (CANVAS, CANVAS), CREAM)
-    draw = ImageDraw.Draw(img)
-
-    header_h = 88
-    footer_h = 68
-    _draw_header(draw, CANVAS, header_h, (fields["city"] or "PAKISTAN").upper())
-
-    margin = 48
-    y = header_h + 36
-    sector = (fields.get("sector") or fields.get("category") or "TENDER").upper()
-    sector_font = _font(FONT_BOLD, 16)
-    draw.text((margin, y), sector, font=sector_font, fill=GOLD)
-    y += 28
-
-    title_h = 168
-    font, lines, line_height = _fit_title(
-        draw,
-        (tender.get("title") or "").strip() or "Tender notice",
-        CANVAS - margin * 2,
-        title_h,
-        max_lines=3,
-        start_size=40,
-        min_size=24,
-    )
-    for line in lines:
-        draw.text((margin, y), line, font=font, fill=NAVY)
-        y += line_height
-    y += 22
-
-    draw.line([(margin, y), (CANVAS - margin, y)], fill=GOLD, width=3)
-    y += 28
-
-    cards = [
-        ("DEPARTMENT", fields["department"] or "Not listed"),
-        ("CLOSES", fields["deadline"] or "Not listed"),
-        ("BID SECURITY", fields["bid_security"]),
-        ("BID VALIDITY", fields["bid_validity"]),
-    ]
-
-    gap = 16
-    card_w = (CANVAS - margin * 2 - gap) // 2
-    inner = 18
-    label_font = _font(FONT_BOLD, 13)
-
-    fitted = [_fit_value(draw, value, card_w - inner * 2, max_lines=2, start_size=24) for _, value in cards]
-    row_h = []
-    for row in range(2):
-        pair = fitted[row * 2 : row * 2 + 2]
-        content = max(22 + lh * len(lines) for _, lines, lh in pair)
-        row_h.append(max(118, content + 36))
-
-    used = row_h[0] + gap + row_h[1]
-    limit = CANVAS - footer_h - 36 - y
-    extra = min(limit - used, 80)
-    if extra > 0:
-        row_h[0] += extra // 2
-        row_h[1] += extra - extra // 2
-
-    for i, (label, _value) in enumerate(cards):
-        row, col = divmod(i, 2)
-        x = margin + col * (card_w + gap)
-        cy = y + (0 if row == 0 else row_h[0] + gap)
-        h = row_h[row]
-        draw.rounded_rectangle(
-            [x, cy, x + card_w, cy + h],
-            radius=16,
-            fill=WHITE,
-            outline=CARD_LINE,
-            width=1,
-        )
-        draw.rectangle([x, cy, x + 8, cy + h], fill=GOLD)
-        draw.text((x + inner + 4, cy + 22), label, font=label_font, fill=GOLD)
-        vfont, vlines, vlh = fitted[i]
-        vy = cy + 50
-        for line in vlines:
-            draw.text((x + inner + 4, vy), line, font=vfont, fill=INK)
-            vy += vlh
-
-    _draw_footer(draw, CANVAS - footer_h, CANVAS, "Full details and apply link in the caption")
-    img.save(output_path, "PNG", optimize=True)
-    return output_path
+def pick_theme(niche_id: str = "", rotate_key: int = 0) -> dict:
+    """Rotate palette by niche index + day so posts differ across sectors."""
+    day = datetime.now().timetuple().tm_yday
+    niche_order = ("civil_works", "health", "ict", "works", "goods", "services")
+    try:
+        niche_i = niche_order.index(niche_id)
+    except ValueError:
+        niche_i = sum(ord(c) for c in (niche_id or "x"))
+    return THEMES[(niche_i + day + rotate_key) % len(THEMES)]
 
 
 def generate_digest_image(
@@ -237,98 +153,117 @@ def generate_digest_image(
     tenders: list,
     output_path: str,
     max_items: int | None = None,
+    niche_id: str = "",
 ) -> str:
+    """Digest card showing only the tenders passed in (already capped by caller)."""
     import config as app_config
 
-    max_items = max_items if max_items is not None else min(app_config.DIGEST_MAX_ITEMS, 5)
+    max_items = max_items if max_items is not None else app_config.DIGEST_MAX_ITEMS
     shown = tenders[:max_items]
-    overflow = max(0, len(tenders) - len(shown))
+    theme = pick_theme(niche_id)
+    primary = theme["primary"]
+    accent = theme["accent"]
+    accent_soft = theme["accent_soft"]
+    bg = theme["bg"]
+    card_line = theme["card_line"]
+    muted = theme["muted"]
 
-    img = Image.new("RGB", (CANVAS, CANVAS), CREAM)
+    img = Image.new("RGB", (CANVAS, CANVAS), bg)
     draw = ImageDraw.Draw(img)
 
-    header_h = 168
-    footer_h = 68
-    margin = 48
+    header_h = 150
+    footer_h = 64
+    margin = 40
 
-    draw.rectangle([0, 0, CANVAS, header_h], fill=NAVY)
-    draw.rectangle([0, header_h - 6, CANVAS, header_h], fill=GOLD)
-    draw.text((margin, 24), BRAND, font=_font(FONT_BOLD, 18), fill=GOLD_SOFT)
-    draw.text((margin, 58), niche_label, font=_font(FONT_BOLD, 36), fill=WHITE)
+    draw.rectangle([0, 0, CANVAS, header_h], fill=primary)
+    draw.rectangle([0, header_h - 5, CANVAS, header_h], fill=accent)
+    draw.text((margin, 22), BRAND, font=_font(FONT_BOLD, 17), fill=accent_soft)
+    draw.text((margin, 54), niche_label, font=_font(FONT_BOLD, 34), fill=WHITE)
     today = datetime.now().strftime("%d %b %Y")
-    sub = f"{len(tenders)} new · {today} · Islamabad, Lahore, Karachi"
-    draw.text((margin, 112), sub, font=_font(FONT_REGULAR, 18), fill=GOLD_SOFT)
+    sub = f"{len(shown)} tender{'s' if len(shown) != 1 else ''} · {today}"
+    draw.text((margin, 104), sub, font=_font(FONT_REGULAR, 18), fill=accent_soft)
 
-    body_top = header_h + 24
-    body_bottom = CANVAS - footer_h - 16
+    body_top = header_h + 20
+    body_bottom = CANVAS - footer_h - 12
     available = body_bottom - body_top
-    row_gap = 14
     n = max(len(shown), 1)
+    row_gap = 10
     row_h = (available - row_gap * (n - 1)) // n
-    row_h = max(108, min(row_h, 130))
-    block = len(shown) * row_h + row_gap * max(len(shown) - 1, 0)
+    row_h = max(118, min(row_h, 155))
+    block = n * row_h + row_gap * (n - 1)
     if block < available:
-        body_top += (available - block) // 3
+        body_top += (available - block) // 2
 
-    title_font_row = _font(FONT_BOLD, 22)
-    meta_font = _font(FONT_REGULAR, 16)
-    num_font = _font(FONT_BOLD, 18)
+    title_font = _font(FONT_BOLD, 20)
+    meta_font = _font(FONT_REGULAR, 15)
+    num_font = _font(FONT_BOLD, 17)
 
     for i, tender in enumerate(shown):
         fields = facebook_poster.extract_fields(tender)
         y = body_top + i * (row_h + row_gap)
         draw.rounded_rectangle(
             [margin, y, CANVAS - margin, y + row_h],
-            radius=14,
+            radius=12,
             fill=WHITE,
-            outline=CARD_LINE,
+            outline=card_line,
             width=1,
         )
+        draw.rectangle([margin, y, margin + 6, y + row_h], fill=accent)
 
-        cx, cy, cr = margin + 36, y + row_h // 2, 20
-        draw.ellipse([cx - cr, cy - cr, cx + cr, cy + cr], fill=GOLD)
+        cx, cy, cr = margin + 34, y + row_h // 2, 18
+        draw.ellipse([cx - cr, cy - cr, cx + cr, cy + cr], fill=accent)
         num = str(i + 1)
         nb = draw.textbbox((0, 0), num, font=num_font)
         nw, nh = nb[2] - nb[0], nb[3] - nb[1]
-        draw.text((cx - nw / 2, cy - nh / 2 - nb[1]), num, font=num_font, fill=NAVY)
+        draw.text((cx - nw / 2, cy - nh / 2 - nb[1]), num, font=num_font, fill=primary)
 
-        tx = margin + 68
-        content_w = CANVAS - margin - tx - 20
-        title_lines = _wrap_text(
+        tx = margin + 62
+        content_w = CANVAS - margin - tx - 18
+
+        title = _ellipsis(
             draw,
             (tender.get("title") or "").strip() or "Untitled",
-            title_font_row,
+            title_font,
             content_w,
-        )[:2]
-        ty = y + 18
-        for line in title_lines:
-            draw.text((tx, ty), line, font=title_font_row, fill=NAVY)
-            ty += 26
+        )
+        ty = y + 16
+        draw.text((tx, ty), title, font=title_font, fill=primary)
+        ty += 28
 
         dept = fields.get("department") or ""
         if dept:
-            dept_lines = _wrap_text(draw, dept, meta_font, content_w)[:1]
-            draw.text((tx, ty + 6), dept_lines[0], font=meta_font, fill=INK)
-            ty += 26 + 14  # blank line after organization
+            draw.text(
+                (tx, ty),
+                _ellipsis(draw, dept, meta_font, content_w),
+                font=meta_font,
+                fill=INK,
+            )
+            ty += 22 + 16  # blank line after organization
 
         city = fields["city"] or ""
-        deadline = fields["deadline"] or ""
+        closes = facebook_poster._short_deadline(fields["deadline"] or "")
         security = fields.get("bid_security") or ""
         if security in ("Not listed", "N/A"):
             security = ""
-        meta = " · ".join(p for p in (city, deadline, security) if p)
+        meta = " · ".join(p for p in (city, closes, security) if p)
         if meta:
-            draw.text((tx, ty + 4), meta, font=meta_font, fill=MUTED)
+            draw.text(
+                (tx, ty),
+                _ellipsis(draw, meta, meta_font, content_w),
+                font=meta_font,
+                fill=muted,
+            )
 
-    if overflow:
-        note_font = _font(FONT_BOLD, 16)
-        draw.text(
-            (margin, body_bottom - 4),
-            f"+{overflow} more in the caption",
-            font=note_font,
-            fill=GOLD,
-        )
+    draw.rectangle([0, CANVAS - footer_h, CANVAS, CANVAS], fill=primary)
+    foot = "Apply links in the post caption"
+    fb = draw.textbbox((0, 0), foot, font=_font(FONT_REGULAR, 17))
+    fw = fb[2] - fb[0]
+    draw.text(
+        ((CANVAS - fw) // 2, CANVAS - footer_h + 20),
+        foot,
+        font=_font(FONT_REGULAR, 17),
+        fill=accent_soft,
+    )
 
-    _draw_footer(draw, CANVAS - footer_h, CANVAS, "Tap the post for apply links")
     img.save(output_path, "PNG", optimize=True)
     return output_path

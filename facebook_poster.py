@@ -1,4 +1,5 @@
 import logging
+import json
 import re
 from datetime import datetime
 
@@ -269,24 +270,58 @@ def post_to_page(message: str) -> dict:
 
 
 def post_photo_to_page(image_path: str, caption: str) -> dict:
+    """Upload photo then publish it as a Page feed post (not Photos-only).
+
+    Direct /photos posts often land in the album without showing under Posts.
+    Unpublished upload + /feed attached_media creates a normal timeline post.
+    """
     if not config.FB_PAGE_ID or not config.FB_PAGE_ACCESS_TOKEN:
         raise FacebookPostError(
             "FB_PAGE_ID / FB_PAGE_ACCESS_TOKEN not configured. See .env.example."
         )
 
-    url = f"https://graph.facebook.com/{config.FB_GRAPH_API_VERSION}/{config.FB_PAGE_ID}/photos"
-    with open(image_path, "rb") as image_file:
-        files = {"source": image_file}
-        payload = {"caption": caption, "access_token": config.FB_PAGE_ACCESS_TOKEN}
-        response = requests.post(url, data=payload, files=files, timeout=60)
+    token = config.FB_PAGE_ACCESS_TOKEN
+    page_id = config.FB_PAGE_ID
+    version = config.FB_GRAPH_API_VERSION
 
-    data = response.json()
-    if response.status_code != 200 or "error" in data:
-        error = data.get("error", {})
+    upload_url = f"https://graph.facebook.com/{version}/{page_id}/photos"
+    with open(image_path, "rb") as image_file:
+        upload = requests.post(
+            upload_url,
+            data={
+                "published": "false",
+                "temporary": "true",
+                "access_token": token,
+            },
+            files={"source": image_file},
+            timeout=60,
+        )
+    upload_data = upload.json()
+    if upload.status_code != 200 or "error" in upload_data or "id" not in upload_data:
+        error = upload_data.get("error", {})
         raise FacebookPostError(
-            f"Facebook API error ({response.status_code}): "
-            f"{error.get('message', response.text)}"
+            f"Facebook photo upload error ({upload.status_code}): "
+            f"{error.get('message', upload.text)}"
         )
 
-    logger.info("Posted photo to Facebook, post id: %s", data.get("post_id") or data.get("id"))
-    return data
+    photo_id = upload_data["id"]
+    feed_url = f"https://graph.facebook.com/{version}/{page_id}/feed"
+    feed = requests.post(
+        feed_url,
+        data={
+            "message": caption,
+            "attached_media[0]": json.dumps({"media_fbid": photo_id}),
+            "access_token": token,
+        },
+        timeout=60,
+    )
+    feed_data = feed.json()
+    if feed.status_code != 200 or "error" in feed_data:
+        error = feed_data.get("error", {})
+        raise FacebookPostError(
+            f"Facebook feed post error ({feed.status_code}): "
+            f"{error.get('message', feed.text)}"
+        )
+
+    logger.info("Posted to Facebook feed, post id: %s", feed_data.get("id"))
+    return feed_data

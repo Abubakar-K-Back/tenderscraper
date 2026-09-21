@@ -147,9 +147,8 @@ def spotlight_score(tender: dict, now: datetime | None = None) -> float:
 
 
 def pick_spotlight(tenders: list[dict]) -> dict | None:
-    if not tenders or not config.SPOTLIGHT_ENABLED:
-        return None
-    return max(tenders, key=spotlight_score)
+    """Deprecated — spotlight posts removed."""
+    return None
 
 
 def select_digest_groups(
