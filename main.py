@@ -81,12 +81,23 @@ def run(dry_run: bool = False, pages: int = None):
     _enrich_details(new_tenders)
 
     out_of_niche = []
+    weak_title = []
     in_scope = []
     for tender in new_tenders:
-        if niches.assign_niche(tender) is None:
+        if not niches.is_meaningful_title(tender.get("title", "")):
+            weak_title.append(tender)
+        elif niches.assign_niche(tender) is None:
             out_of_niche.append(tender)
         else:
             in_scope.append(tender)
+
+    if weak_title:
+        logger.info(
+            "Marking %d generic/short-title tenders as seen (not posting)",
+            len(weak_title),
+        )
+        if not dry_run:
+            storage.mark_many_posted(weak_title)
 
     if out_of_niche:
         logger.info(

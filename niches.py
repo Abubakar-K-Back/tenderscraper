@@ -22,6 +22,70 @@ _SECTOR_ID_TO_NICHE = {
     meta["sector_id"]: niche_id for niche_id, meta in NICHE_DEFINITIONS.items()
 }
 
+# Titles that say nothing useful to a bidder scrolling Facebook.
+_GENERIC_TITLES = {
+    "invitation to bid",
+    "invitation for bid",
+    "invitation for bids",
+    "invitation to tender",
+    "invitation for tender",
+    "invitation for tenders",
+    "tender notice",
+    "tender notice.",
+    "notice inviting tender",
+    "notice inviting tenders",
+    "notice inviting bids",
+    "nit",
+    "ifb",
+    "itt",
+    "tender",
+    "tenders",
+    "bid notice",
+    "bidding notice",
+    "request for proposal",
+    "request for quotations",
+    "request for quotation",
+    "rfq",
+    "rfp",
+    "eoi",
+    "expression of interest",
+}
+
+_MIN_TITLE_LEN = 28
+
+
+def is_meaningful_title(title: str) -> bool:
+    """False for empty, tiny, or generic labels like 'Invitation to Bid'."""
+    raw = (title or "").strip()
+    if not raw:
+        return False
+    normalized = re.sub(r"\s+", " ", raw).strip(" .-_|").lower()
+    if normalized in _GENERIC_TITLES:
+        return False
+    # "Invitation to Bid - ..." with almost no substance after the label
+    for prefix in (
+        "invitation to bid",
+        "invitation for bid",
+        "invitation for bids",
+        "invitation to tender",
+        "tender notice",
+        "notice inviting tender",
+        "notice inviting tenders",
+    ):
+        if normalized == prefix or normalized.startswith(prefix + " ") and len(normalized) < _MIN_TITLE_LEN:
+            return False
+        if normalized.startswith(prefix + " -") or normalized.startswith(prefix + " –"):
+            rest = normalized.split("-", 1)[-1].split("–", 1)[-1].strip()
+            if len(rest) < 12:
+                return False
+    if len(normalized) < _MIN_TITLE_LEN:
+        return False
+    # Mostly punctuation / numbers only
+    letters = sum(1 for c in normalized if c.isalpha())
+    if letters < 16:
+        return False
+    return True
+
 
 def enabled_niche_ids() -> list[str]:
     ids = []
@@ -52,18 +116,24 @@ def assign_niche(tender: dict) -> str | None:
 
 def filter_and_group(tenders: list[dict]) -> dict[str, list[dict]]:
     grouped: dict[str, list[dict]] = defaultdict(list)
-    skipped = 0
+    skipped_niche = 0
+    skipped_title = 0
     for tender in tenders:
+        if not is_meaningful_title(tender.get("title", "")):
+            skipped_title += 1
+            continue
         niche_id = assign_niche(tender)
         if niche_id is None:
-            skipped += 1
+            skipped_niche += 1
             continue
         tender["niche_id"] = niche_id
         tender["niche_label"] = niche_label(niche_id)
         grouped[niche_id].append(tender)
 
-    if skipped:
-        logger.info("Skipped %d tenders outside enabled sector niches", skipped)
+    if skipped_title:
+        logger.info("Skipped %d tenders with generic/short titles", skipped_title)
+    if skipped_niche:
+        logger.info("Skipped %d tenders outside enabled sector niches", skipped_niche)
     return dict(grouped)
 
 
