@@ -1,28 +1,57 @@
+"""Square Facebook cards: navy header, gold accents, readable on a phone feed."""
+
 import os
+from datetime import datetime
 
 from PIL import Image, ImageDraw, ImageFont
 
 import facebook_poster
 
-CANVAS_W = 1200
+CANVAS = 1080
 
-BG_COLOR = (250, 249, 246)
-NAVY = (11, 27, 58)
-GOLD = (170, 125, 40)
-VALUE_COLOR = (40, 40, 45)
+NAVY = (12, 28, 58)
+GOLD = (201, 154, 62)
+GOLD_SOFT = (232, 208, 150)
+CREAM = (247, 244, 238)
+WHITE = (255, 255, 255)
+INK = (28, 32, 40)
+MUTED = (98, 104, 116)
+CARD = (255, 255, 255)
+CARD_LINE = (230, 224, 212)
+
+BRAND = "PAKISTAN TENDER ALERTS"
 
 FONT_DIR = "/usr/share/fonts/truetype/dejavu"
 FONT_BOLD = os.path.join(FONT_DIR, "DejaVuSans-Bold.ttf")
 FONT_REGULAR = os.path.join(FONT_DIR, "DejaVuSans.ttf")
 
-MARGIN = 60
 
-TOP_PAD = 26
-TITLE_BLOCK_H = 220
-BOTTOM_PAD = 50
+def _resolve_fonts():
+    bold, regular = FONT_BOLD, FONT_REGULAR
+    if os.path.isfile(bold) and os.path.isfile(regular):
+        return bold, regular
+    windir = os.environ.get("WINDIR", r"C:\Windows")
+    candidates = [
+        (
+            os.path.join(windir, "Fonts", "segoeuib.ttf"),
+            os.path.join(windir, "Fonts", "segoeui.ttf"),
+        ),
+        (
+            os.path.join(windir, "Fonts", "arialbd.ttf"),
+            os.path.join(windir, "Fonts", "arial.ttf"),
+        ),
+        (
+            "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
+            "/System/Library/Fonts/Supplemental/Arial.ttf",
+        ),
+    ]
+    for b, r in candidates:
+        if os.path.isfile(b) and os.path.isfile(r):
+            return b, r
+    return bold, regular
 
-WATERMARK_TEXT = "PAKISTAN TENDER ALERTS"
-WATERMARK_COLOR = (160, 160, 162)
+
+FONT_BOLD, FONT_REGULAR = _resolve_fonts()
 
 
 def _font(path: str, size: int) -> ImageFont.FreeTypeFont:
@@ -35,7 +64,7 @@ def _text_width(draw: ImageDraw.ImageDraw, text: str, font) -> int:
 
 
 def _wrap_text(draw: ImageDraw.ImageDraw, text: str, font, max_width: int):
-    words = text.split()
+    words = (text or "").split()
     lines = []
     current = ""
     for word in words:
@@ -47,37 +76,35 @@ def _wrap_text(draw: ImageDraw.ImageDraw, text: str, font, max_width: int):
             current = word
     if current:
         lines.append(current)
-    return lines
+    return lines or [""]
 
 
-def _fit_title(draw, text, max_width, max_height, max_lines=3, start_size=44, min_size=22):
+def _fit_title(draw, text, max_width, max_height, max_lines=3, start_size=42, min_size=24):
     size = start_size
     while size >= min_size:
         font = _font(FONT_BOLD, size)
         lines = _wrap_text(draw, text, font, max_width)
-        line_height = int(size * 1.3)
+        line_height = int(size * 1.22)
         if len(lines) <= max_lines and line_height * len(lines) <= max_height:
             return font, lines, line_height
         size -= 2
 
     font = _font(FONT_BOLD, min_size)
     lines = _wrap_text(draw, text, font, max_width)
-    line_height = int(min_size * 1.3)
+    line_height = int(min_size * 1.22)
     if len(lines) > max_lines:
         lines = lines[:max_lines]
         lines[-1] = lines[-1].rstrip(",.;- ") + "…"
     return font, lines, line_height
 
 
-def _fit_value(draw, text, max_width, max_lines=2, start_size=32, min_size=18):
-    """Wraps a value onto up to `max_lines`, shrinking the font first rather
-    than truncating, so long department names etc. still read in full."""
+def _fit_value(draw, text, max_width, max_lines=2, start_size=26, min_size=16):
     size = start_size
     while size >= min_size:
         font = _font(FONT_REGULAR, size)
         lines = _wrap_text(draw, text, font, max_width)
         if len(lines) <= max_lines:
-            return font, lines, int(size * 1.25)
+            return font, lines, int(size * 1.22)
         size -= 2
 
     font = _font(FONT_REGULAR, min_size)
@@ -88,98 +115,220 @@ def _fit_value(draw, text, max_width, max_lines=2, start_size=32, min_size=18):
         while last and _text_width(draw, last + "…", font) > max_width:
             last = last[:-1]
         lines[-1] = last.rstrip() + "…"
-    return font, lines, int(min_size * 1.25)
+    return font, lines, int(min_size * 1.22)
+
+
+def _draw_header(draw, width, height, right_label=""):
+    draw.rectangle([0, 0, width, height], fill=NAVY)
+    draw.rectangle([0, height - 6, width, height], fill=GOLD)
+
+    brand_font = _font(FONT_BOLD, 18)
+    draw.text((48, 28), BRAND, font=brand_font, fill=GOLD_SOFT)
+
+    if right_label:
+        pill_font = _font(FONT_BOLD, 16)
+        pad_x, pad_y = 16, 8
+        bbox = draw.textbbox((0, 0), right_label, font=pill_font)
+        tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+        pw, ph = tw + pad_x * 2, th + pad_y * 2
+        x1 = width - 48
+        x0 = x1 - pw
+        y0 = 22
+        y1 = y0 + ph
+        draw.rounded_rectangle([x0, y0, x1, y1], radius=ph // 2, fill=GOLD)
+        draw.text((x0 + pad_x, y0 + pad_y - bbox[1]), right_label, font=pill_font, fill=NAVY)
+
+
+def _draw_footer(draw, y, width, text):
+    draw.rectangle([0, y, width, CANVAS], fill=NAVY)
+    font = _font(FONT_REGULAR, 18)
+    bbox = draw.textbbox((0, 0), text, font=font)
+    tw = bbox[2] - bbox[0]
+    draw.text(((width - tw) // 2, y + 22), text, font=font, fill=GOLD_SOFT)
 
 
 def generate_tender_image(tender: dict, output_path: str) -> str:
     fields = facebook_poster.extract_fields(tender)
+    img = Image.new("RGB", (CANVAS, CANVAS), CREAM)
+    draw = ImageDraw.Draw(img)
 
-    # First pass on a throwaway canvas to measure the watermark height.
-    probe = Image.new("RGB", (CANVAS_W, 10), BG_COLOR)
-    probe_draw = ImageDraw.Draw(probe)
-    watermark_font = _font(FONT_BOLD, 16)
-    watermark_bbox = probe_draw.textbbox((MARGIN, TOP_PAD), WATERMARK_TEXT, font=watermark_font)
+    header_h = 88
+    footer_h = 68
+    _draw_header(draw, CANVAS, header_h, (fields["city"] or "PAKISTAN").upper())
 
-    title_y0 = watermark_bbox[3] + 26
-    rule_y = title_y0 + TITLE_BLOCK_H + 26
-    rows_y0 = rule_y + 2 + 26
+    margin = 48
+    y = header_h + 36
+    sector = (fields.get("sector") or fields.get("category") or "TENDER").upper()
+    sector_font = _font(FONT_BOLD, 16)
+    draw.text((margin, y), sector, font=sector_font, fill=GOLD)
+    y += 28
 
-    col_width = (CANVAS_W - MARGIN * 2) // 2
-    label_font = _font(FONT_BOLD, 20)
-    grid = [
-        ("DEPARTMENT", fields["department"] or "N/A"),
-        ("SUBMISSION DEADLINE", fields["deadline"] or "N/A"),
+    title_h = 168
+    font, lines, line_height = _fit_title(
+        draw,
+        (tender.get("title") or "").strip() or "Tender notice",
+        CANVAS - margin * 2,
+        title_h,
+        max_lines=3,
+        start_size=40,
+        min_size=24,
+    )
+    for line in lines:
+        draw.text((margin, y), line, font=font, fill=NAVY)
+        y += line_height
+    y += 22
+
+    draw.line([(margin, y), (CANVAS - margin, y)], fill=GOLD, width=3)
+    y += 28
+
+    cards = [
+        ("DEPARTMENT", fields["department"] or "Not listed"),
+        ("CLOSES", fields["deadline"] or "Not listed"),
         ("BID SECURITY", fields["bid_security"]),
         ("BID VALIDITY", fields["bid_validity"]),
     ]
 
-    # Pre-compute each field's fitted font/lines so row heights can flex to
-    # fit whichever of the two columns in that row needs more room.
-    fitted = [
-        _fit_value(probe_draw, value, col_width - 30) for _, value in grid
-    ]
+    gap = 16
+    card_w = (CANVAS - margin * 2 - gap) // 2
+    inner = 18
+    label_font = _font(FONT_BOLD, 13)
 
-    row_gap = 30
-    row_positions = []
-    y_cursor = rows_y0
-    for row_idx in range(0, len(grid), 2):
-        row_fields = fitted[row_idx:row_idx + 2]
-        row_content_h = max(32 + line_height * len(lines) for _, lines, line_height in row_fields)
-        row_positions.append(y_cursor)
-        y_cursor += row_content_h + row_gap
-    rows_bottom = y_cursor - row_gap
+    fitted = [_fit_value(draw, value, card_w - inner * 2, max_lines=2, start_size=24) for _, value in cards]
+    row_h = []
+    for row in range(2):
+        pair = fitted[row * 2 : row * 2 + 2]
+        content = max(22 + lh * len(lines) for _, lines, lh in pair)
+        row_h.append(max(118, content + 36))
 
-    canvas_h = rows_bottom + BOTTOM_PAD
+    used = row_h[0] + gap + row_h[1]
+    limit = CANVAS - footer_h - 36 - y
+    extra = min(limit - used, 80)
+    if extra > 0:
+        row_h[0] += extra // 2
+        row_h[1] += extra - extra // 2
 
-    img = Image.new("RGB", (CANVAS_W, canvas_h), BG_COLOR)
+    for i, (label, _value) in enumerate(cards):
+        row, col = divmod(i, 2)
+        x = margin + col * (card_w + gap)
+        cy = y + (0 if row == 0 else row_h[0] + gap)
+        h = row_h[row]
+        draw.rounded_rectangle(
+            [x, cy, x + card_w, cy + h],
+            radius=16,
+            fill=WHITE,
+            outline=CARD_LINE,
+            width=1,
+        )
+        draw.rectangle([x, cy, x + 8, cy + h], fill=GOLD)
+        draw.text((x + inner + 4, cy + 22), label, font=label_font, fill=GOLD)
+        vfont, vlines, vlh = fitted[i]
+        vy = cy + 50
+        for line in vlines:
+            draw.text((x + inner + 4, vy), line, font=vfont, fill=INK)
+            vy += vlh
+
+    _draw_footer(draw, CANVAS - footer_h, CANVAS, "Full details and apply link in the caption")
+    img.save(output_path, "PNG", optimize=True)
+    return output_path
+
+
+def generate_digest_image(
+    niche_label: str,
+    tenders: list,
+    output_path: str,
+    max_items: int | None = None,
+) -> str:
+    import config as app_config
+
+    max_items = max_items if max_items is not None else min(app_config.DIGEST_MAX_ITEMS, 5)
+    shown = tenders[:max_items]
+    overflow = max(0, len(tenders) - len(shown))
+
+    img = Image.new("RGB", (CANVAS, CANVAS), CREAM)
     draw = ImageDraw.Draw(img)
 
-    # Subtle brand watermark, top-left
-    draw.text((MARGIN, TOP_PAD), WATERMARK_TEXT, font=watermark_font, fill=WATERMARK_COLOR)
+    header_h = 168
+    footer_h = 68
+    margin = 48
 
-    # Category pill, top-right
-    category_text = (fields["category"] or "TENDER").upper()
-    pill_font = _font(FONT_BOLD, 18)
-    pad_x, pad_y = 16, 8
-    bbox = draw.textbbox((0, 0), category_text, font=pill_font)
-    pill_w = (bbox[2] - bbox[0]) + pad_x * 2
-    pill_h = (bbox[3] - bbox[1]) + pad_y * 2
-    pill_x1 = CANVAS_W - MARGIN
-    pill_x0 = pill_x1 - pill_w
-    pill_y0 = TOP_PAD - 4
-    pill_y1 = pill_y0 + pill_h
-    draw.rounded_rectangle(
-        [pill_x0, pill_y0, pill_x1, pill_y1], radius=pill_h // 2, outline=GOLD, width=2
-    )
-    draw.text(
-        (pill_x0 + pad_x, pill_y0 + pad_y - bbox[1]),
-        category_text,
-        font=pill_font,
-        fill=GOLD,
-    )
+    draw.rectangle([0, 0, CANVAS, header_h], fill=NAVY)
+    draw.rectangle([0, header_h - 6, CANVAS, header_h], fill=GOLD)
+    draw.text((margin, 24), BRAND, font=_font(FONT_BOLD, 18), fill=GOLD_SOFT)
+    draw.text((margin, 58), niche_label, font=_font(FONT_BOLD, 36), fill=WHITE)
+    today = datetime.now().strftime("%d %b %Y")
+    sub = f"{len(tenders)} new · {today} · Islamabad, Lahore, Karachi"
+    draw.text((margin, 112), sub, font=_font(FONT_REGULAR, 18), fill=GOLD_SOFT)
 
-    # Title, auto-shrunk/wrapped to fit
-    title_max_width = CANVAS_W - MARGIN * 2
-    font, lines, line_height = _fit_title(draw, tender["title"].strip(), title_max_width, TITLE_BLOCK_H)
-    total_height = line_height * len(lines)
-    y = title_y0 + max(0, (TITLE_BLOCK_H - total_height) // 2)
-    for line in lines:
-        draw.text((MARGIN, y), line, font=font, fill=NAVY)
-        y += line_height
+    body_top = header_h + 24
+    body_bottom = CANVAS - footer_h - 16
+    available = body_bottom - body_top
+    row_gap = 14
+    n = max(len(shown), 1)
+    row_h = (available - row_gap * (n - 1)) // n
+    row_h = max(108, min(row_h, 130))
+    block = len(shown) * row_h + row_gap * max(len(shown) - 1, 0)
+    if block < available:
+        body_top += (available - block) // 3
 
-    draw.line([(MARGIN, rule_y), (CANVAS_W - MARGIN, rule_y)], fill=GOLD, width=2)
+    title_font_row = _font(FONT_BOLD, 22)
+    meta_font = _font(FONT_REGULAR, 16)
+    num_font = _font(FONT_BOLD, 18)
 
-    # Key info, 2 columns x 2 rows, each value auto-wrapped/shrunk to fit
-    for i, (label, value) in enumerate(grid):
-        row, col = divmod(i, 2)
-        x = MARGIN + col * col_width
-        yy = row_positions[row]
-        draw.text((x, yy), label, font=label_font, fill=GOLD)
-        value_font, value_lines, value_line_height = fitted[i]
-        vy = yy + 32
-        for line in value_lines:
-            draw.text((x, vy), line, font=value_font, fill=VALUE_COLOR)
-            vy += value_line_height
+    for i, tender in enumerate(shown):
+        fields = facebook_poster.extract_fields(tender)
+        y = body_top + i * (row_h + row_gap)
+        draw.rounded_rectangle(
+            [margin, y, CANVAS - margin, y + row_h],
+            radius=14,
+            fill=WHITE,
+            outline=CARD_LINE,
+            width=1,
+        )
 
-    img.save(output_path, "PNG")
+        cx, cy, cr = margin + 36, y + row_h // 2, 20
+        draw.ellipse([cx - cr, cy - cr, cx + cr, cy + cr], fill=GOLD)
+        num = str(i + 1)
+        nb = draw.textbbox((0, 0), num, font=num_font)
+        nw, nh = nb[2] - nb[0], nb[3] - nb[1]
+        draw.text((cx - nw / 2, cy - nh / 2 - nb[1]), num, font=num_font, fill=NAVY)
+
+        tx = margin + 68
+        content_w = CANVAS - margin - tx - 20
+        title_lines = _wrap_text(
+            draw,
+            (tender.get("title") or "").strip() or "Untitled",
+            title_font_row,
+            content_w,
+        )[:2]
+        ty = y + 18
+        for line in title_lines:
+            draw.text((tx, ty), line, font=title_font_row, fill=NAVY)
+            ty += 26
+
+        dept = fields.get("department") or ""
+        if dept:
+            dept_lines = _wrap_text(draw, dept, meta_font, content_w)[:1]
+            draw.text((tx, ty + 6), dept_lines[0], font=meta_font, fill=INK)
+            ty += 26 + 14  # blank line after organization
+
+        city = fields["city"] or ""
+        deadline = fields["deadline"] or ""
+        security = fields.get("bid_security") or ""
+        if security in ("Not listed", "N/A"):
+            security = ""
+        meta = " · ".join(p for p in (city, deadline, security) if p)
+        if meta:
+            draw.text((tx, ty + 4), meta, font=meta_font, fill=MUTED)
+
+    if overflow:
+        note_font = _font(FONT_BOLD, 16)
+        draw.text(
+            (margin, body_bottom - 4),
+            f"+{overflow} more in the caption",
+            font=note_font,
+            fill=GOLD,
+        )
+
+    _draw_footer(draw, CANVAS - footer_h, CANVAS, "Tap the post for apply links")
+    img.save(output_path, "PNG", optimize=True)
     return output_path

@@ -1,4 +1,6 @@
 import logging
+import re
+from datetime import datetime
 
 import requests
 
@@ -6,8 +8,8 @@ import config
 
 logger = logging.getLogger(__name__)
 
-MAX_TITLE_LENGTH = 140
-SEPARATOR = "-" * 40
+MAX_TITLE_LENGTH = 110
+MAX_DIGEST_TITLE = 88
 
 
 class FacebookPostError(Exception):
@@ -23,13 +25,75 @@ def _truncate(text: str, max_len: int) -> str:
     return text[:cutoff].rstrip(",.;- ") + "…"
 
 
+def _clean_money(raw: str) -> str:
+    """Turn '20,000,000.00' into 'PKR 20,000,000'."""
+    text = (raw or "").strip()
+    if not text or text in ("0", "0.0", "0.00", "N/A"):
+        return ""
+    text = re.sub(r"^PKR\s*", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\.00$", "", text)
+    return f"PKR {text}" if text else ""
+
+
+def _short_deadline(raw: str) -> str:
+    """'October 05, 2026 at 11:00 AM' → '5 Oct, 11am'."""
+    text = (raw or "").strip()
+    if not text:
+        return ""
+
+    date_part = text
+    time_part = ""
+    if re.search(r"\s+at\s+", text, flags=re.IGNORECASE):
+        date_part, time_part = re.split(r"\s+at\s+", text, maxsplit=1, flags=re.IGNORECASE)
+
+    parsed = None
+    for fmt in (
+        "%B %d, %Y",
+        "%b %d, %Y",
+        "%d-%m-%Y",
+        "%d/%m/%Y",
+        "%Y-%m-%d",
+        "%d %b %Y",
+        "%d %B %Y",
+    ):
+        try:
+            parsed = datetime.strptime(date_part.strip(), fmt)
+            break
+        except ValueError:
+            continue
+
+    if not parsed:
+        return text
+
+    day = parsed.day  # no leading zero
+    mon = parsed.strftime("%b")
+    short = f"{day} {mon}"
+
+    time_part = time_part.strip()
+    if time_part:
+        tm = None
+        for fmt in ("%I:%M %p", "%H:%M", "%I %p"):
+            try:
+                tm = datetime.strptime(time_part, fmt)
+                break
+            except ValueError:
+                continue
+        if tm:
+            hour = tm.strftime("%I").lstrip("0") or "0"
+            minute = tm.minute
+            ampm = tm.strftime("%p").lower()
+            short += f", {hour}:{minute:02d}{ampm}" if minute else f", {hour}{ampm}"
+        else:
+            short += f", {time_part}"
+
+    return short
+
+
 def shorten_url(url: str, attempts: int = 2) -> str:
-    """Shorten via TinyURL (free, no API key). Retries once since free
-    shortener endpoints occasionally hiccup, and falls back to the original
-    URL if it still fails, so a link is never dropped."""
+    """Kept for compatibility; captions use the original PPRA URL (more trusted)."""
     if not url:
         return url
-    for attempt in range(attempts):
+    for _attempt in range(attempts):
         try:
             response = requests.get(
                 "https://tinyurl.com/api-create.php",
@@ -41,96 +105,140 @@ def shorten_url(url: str, attempts: int = 2) -> str:
                 return short
         except requests.RequestException:
             pass
-    logger.warning("URL shortening failed for %s, using original URL", url)
     return url
 
 
 def _status_label(status_raw: str) -> str:
-    if "Corrigendum" in status_raw:
-        return "Corrigendum Issued"
-    if "Cancelled" in status_raw:
+    if "Corrigendum" in (status_raw or ""):
+        return "Corrigendum"
+    if "Cancelled" in (status_raw or ""):
         return "Cancelled"
     return "Active"
 
 
 def extract_fields(tender: dict) -> dict:
-    """Derive all the display fields used by both the text notice and the
-    generated image, from the listing row plus the tender's detail page
-    (scraper.fetch_tender_detail). Fields the site doesn't have for a given
-    tender (conditional sections) fall back to "N/A" / empty so callers get
-    a consistent shape."""
+    """Display fields from listing + detail page."""
     detail = tender.get("detail_fields") or {}
 
-    city = detail.get("City") or tender.get("location", "").split(" - ")[0].strip()
+    city = (
+        detail.get("City")
+        or tender.get("city")
+        or tender.get("location", "").split(" - ")[0].strip()
+    )
 
     department = detail.get("Organization Name") or tender.get("organization", "")
 
-    category = detail.get("Procurement Category") or tender.get("category", "") or "N/A"
+    category = (
+        detail.get("Procurement Category")
+        or tender.get("procurement_category")
+        or tender.get("category", "")
+        or ""
+    )
 
-    deadline = tender.get("closing_date", "")
-    if tender.get("closing_time"):
-        deadline += f" at {tender['closing_time']}"
+    sector = detail.get("Sector") or tender.get("sector") or ""
 
-    bid_security = detail.get("Bid Security")
-    bid_security = f"PKR {bid_security}" if bid_security else "N/A"
+    deadline = detail.get("Closing Date & Time") or ""
+    if not deadline:
+        deadline = tender.get("closing_date", "")
+        if tender.get("closing_time"):
+            deadline = f"{deadline} at {tender['closing_time']}".strip()
 
-    bid_validity = detail.get("Bid Validity", "N/A")
-    bidding_method = detail.get("Procurement Procedure", "N/A")
+    bid_security = _clean_money(detail.get("Bid Security", ""))
+    bid_validity = (detail.get("Bid Validity") or "").strip()
+    bidding_method = (
+        detail.get("Procurement Procedure") or detail.get("Method") or ""
+    ).strip()
 
     return {
         "city": city,
         "department": department,
         "category": category,
+        "sector": sector,
         "status_label": _status_label(tender.get("status", "")),
         "deadline": deadline,
-        "bid_security": bid_security,
-        "bid_validity": bid_validity,
-        "bidding_method": bidding_method,
+        "bid_security": bid_security or "Not listed",
+        "bid_validity": bid_validity or "Not listed",
+        "bidding_method": bidding_method or "Not listed",
     }
 
 
-def format_tender_message(tender: dict) -> str:
-    """Formal tender-notice template:
-
-    TENDER NOTICE: [City / Region]
-
-    Project: [Project / Tender Title]
-    Department: [Organization / Authority Name]
-    Category: [...]
-    Status: [...]
-    ----------------------------------------
-    KEY DETAILS
-    - Submission Deadline: [...]
-    - Bid Security: [...]
-    - Bid Validity: [...]
-    - Bidding Method: [...]
-    ----------------------------------------
-
-    Full Details:
-    [link]
-    """
+def format_tender_message(tender: dict, *, spotlight: bool = False) -> str:
+    """Mobile-first caption: hook in the first 2 lines (before 'See more')."""
     f = extract_fields(tender)
+    title = _truncate((tender.get("title") or "").strip(), MAX_TITLE_LENGTH)
+    link = tender.get("detail_url") or ""
+    city = f["city"] or "Pakistan"
+    sector = f["sector"] or f["category"] or "Tender"
 
+    hook = f"{'Spotlight · ' if spotlight else ''}{city} · {sector}"
+    closes = _short_deadline(f["deadline"])
     lines = [
-        f"TENDER NOTICE: {f['city']}",
+        hook,
+        f"Closes {closes}" if closes else "",
         "",
-        f"Project: {_truncate(tender['title'].strip(), MAX_TITLE_LENGTH)}",
-        f"Department: {f['department']}",
-        f"Category: {f['category']}",
-        f"Status: {f['status_label']}",
+        title,
         "",
-        SEPARATOR,
-        "KEY DETAILS",
-        f"- Submission Deadline: {f['deadline']}",
-        f"- Bid Security: {f['bid_security']}",
-        f"- Bid Validity: {f['bid_validity']}",
-        f"- Bidding Method: {f['bidding_method']}",
-        SEPARATOR,
-        "",
-        "Full Details:",
-        shorten_url(tender.get("detail_url", "")),
+        f["department"],
     ]
 
+    facts = []
+    if f["bid_security"] and f["bid_security"] != "Not listed":
+        facts.append(f"Bid security {f['bid_security']}")
+    # Bid validity stays on the image only — skip in caption.
+    if f["status_label"] == "Corrigendum":
+        facts.append("Updated notice (corrigendum)")
+    if facts:
+        lines.append(" · ".join(facts))
+
+    lines.extend(["", "Apply here:", link] if link else [""])
+    lines.extend(
+        [
+            "",
+            "Follow for Islamabad, Lahore and Karachi tenders.",
+            "Share with someone who bids this week.",
+        ]
+    )
+    return "\n".join(line for line in lines if line is not None).replace("\n\n\n", "\n\n")
+
+
+def format_digest_message(niche_label: str, tenders: list) -> str:
+    """Scannable digest: one tender = a few short lines, then the apply link."""
+    today = datetime.now().strftime("%d %b %Y")
+    cities = []
+    for tender in tenders:
+        city = extract_fields(tender)["city"]
+        if city and city not in cities:
+            cities.append(city)
+    city_bit = ", ".join(cities) if cities else "Islamabad, Lahore & Karachi"
+
+    lines = [
+        f"{niche_label} · {today}",
+        f"{len(tenders)} new tender{'s' if len(tenders) != 1 else ''} · {city_bit}",
+        "",
+    ]
+
+    for i, tender in enumerate(tenders, start=1):
+        f = extract_fields(tender)
+        title = _truncate((tender.get("title") or "").strip(), MAX_DIGEST_TITLE)
+        city = f["city"] or ""
+        closes = _short_deadline(f["deadline"])
+        lines.append(f"{i}. {title}")
+        if f["department"]:
+            lines.append(f"   {f['department']}")
+            lines.append("")
+        meta_parts = [p for p in (city, f"closes {closes}" if closes else "") if p]
+        if meta_parts:
+            lines.append("   " + " · ".join(meta_parts))
+        if tender.get("detail_url"):
+            lines.append(f"   {tender['detail_url']}")
+        lines.append("")
+
+    lines.extend(
+        [
+            "Follow for daily Civil Works, Health and IT alerts.",
+            "Comment your city if you want more from there.",
+        ]
+    )
     return "\n".join(lines)
 
 

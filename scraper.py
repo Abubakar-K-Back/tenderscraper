@@ -1,4 +1,5 @@
 import logging
+from itertools import product
 
 import requests
 from bs4 import BeautifulSoup
@@ -39,7 +40,6 @@ def _parse_details_cell(cell):
     category = ""
     for small in cell.find_all("small", class_="badge"):
         if small.find("i") is not None:
-            # badges with an icon are org/location duplicates, not category
             continue
         text = small.get_text(strip=True)
         if text:
@@ -102,13 +102,33 @@ def _parse_row(row):
     }
 
 
-def fetch_page_html(page_num: int) -> str:
+def fetch_page_html(page_num: int, filters: dict | None = None) -> str:
     url = f"{config.SITE_BASE_URL}{config.ACTIVE_TENDERS_PATH}"
-    params = {"page": page_num} if page_num > 1 else {}
+    params = {
+        "keyword": "",
+        "tender_no": "",
+        "closing_date": "",
+        "tender_type": config.TENDER_TYPE,
+        "procurement_category": "",
+        "sector": "",
+        "tender_nature": "",
+        "organization": "",
+        "country": "",
+        "advertise_date_from": "",
+        "advertise_date_to": "",
+        "status": "",
+        "city": "",
+    }
+    if filters:
+        params.update(filters)
+    if page_num > 1:
+        params["page"] = page_num
+
     response = requests.get(url, headers=HEADERS, params=params, timeout=30)
     if response.status_code != 200:
         raise ScrapeError(
-            f"Unexpected status {response.status_code} fetching page {page_num}"
+            f"Unexpected status {response.status_code} fetching page {page_num} "
+            f"filters={filters}"
         )
     return response.text
 
@@ -124,19 +144,72 @@ def parse_tenders(html: str):
     return tenders
 
 
+def _filter_combos():
+    for (cat_id, cat_label), (sector_id, sector_label), city in product(
+        config.PROCUREMENT_CATEGORIES,
+        config.SECTORS,
+        config.CITIES,
+    ):
+        yield {
+            "procurement_category": cat_id,
+            "procurement_category_label": cat_label,
+            "sector": sector_id,
+            "sector_label": sector_label,
+            "city": city,
+        }
+
+
 def scrape_active_tenders(num_pages: int = None):
-    """Scrape the first `num_pages` listing pages, newest tenders first."""
+    """Scrape filtered listing pages and dedupe by tender_no.
+
+    Filters (from config): tender_type, procurement categories, sectors, cities.
+    Each combo is requested separately because PPRA accepts one value per field.
+    """
     num_pages = num_pages or config.PAGES_TO_SCRAPE
-    all_tenders = []
-    for page_num in range(1, num_pages + 1):
-        logger.info("Fetching active tenders page %d", page_num)
-        html = fetch_page_html(page_num)
-        tenders = parse_tenders(html)
-        if not tenders:
-            logger.warning("No tenders found on page %d, stopping pagination", page_num)
-            break
-        all_tenders.extend(tenders)
-    return all_tenders
+    by_id = {}
+
+    for combo in _filter_combos():
+        filters = {
+            "tender_type": config.TENDER_TYPE,
+            "procurement_category": combo["procurement_category"],
+            "sector": combo["sector"],
+            "city": combo["city"],
+        }
+        for page_num in range(1, num_pages + 1):
+            logger.info(
+                "Fetching %s / %s / %s page %d",
+                combo["procurement_category_label"],
+                combo["sector_label"],
+                combo["city"],
+                page_num,
+            )
+            html = fetch_page_html(page_num, filters=filters)
+            tenders = parse_tenders(html)
+            if not tenders:
+                logger.info(
+                    "No tenders for %s / %s / %s page %d",
+                    combo["procurement_category_label"],
+                    combo["sector_label"],
+                    combo["city"],
+                    page_num,
+                )
+                break
+
+            for tender in tenders:
+                tender_no = tender["tender_no"]
+                if tender_no in by_id:
+                    continue
+                tender["procurement_category_id"] = combo["procurement_category"]
+                tender["procurement_category"] = combo["procurement_category_label"]
+                tender["sector_id"] = combo["sector"]
+                tender["sector"] = combo["sector_label"]
+                tender["city"] = combo["city"]
+                # Prefer filter category over listing badge when present
+                if not tender.get("category"):
+                    tender["category"] = combo["procurement_category_label"]
+                by_id[tender_no] = tender
+
+    return list(by_id.values())
 
 
 def fetch_tender_detail_html(tender_no: str) -> str:
@@ -150,10 +223,7 @@ def fetch_tender_detail_html(tender_no: str) -> str:
 
 
 def parse_tender_detail(html: str) -> dict:
-    """Parse the label/value rows on a tender's detail page (Organization/Office
-    Details, Tender Information, Important Dates, Financial Information, etc).
-    Every row on that page follows the same `.detail-label` + value-span pattern,
-    so this stays generic instead of hardcoding each section."""
+    """Parse label/value rows on a tender detail page into a flat dict."""
     soup = BeautifulSoup(html, "html.parser")
     fields = {}
     for item in soup.select(".list-group-item"):

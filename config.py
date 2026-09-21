@@ -18,9 +18,47 @@ FB_PAGE_ID = os.getenv("FB_PAGE_ID", "")
 FB_PAGE_ACCESS_TOKEN = os.getenv("FB_PAGE_ACCESS_TOKEN", "")
 FB_GRAPH_API_VERSION = "v21.0"
 
+# Pages per filter combination (newest first on page 1).
 PAGES_TO_SCRAPE = int(os.getenv("PAGES_TO_SCRAPE", "2"))
-MAX_POSTS_PER_RUN = int(os.getenv("MAX_POSTS_PER_RUN", "15"))
-POST_DELAY_SECONDS = int(os.getenv("POST_DELAY_SECONDS", "1200"))
 
-# Daily run time (24h HH:MM, container-local time) used by scheduler.py.
+# PPRA listing filters (IDs from the site's select options).
+# tender_type=1 → Tender Notice only.
+TENDER_TYPE = os.getenv("TENDER_TYPE", "1")
+
+# Works + Goods + Non-consultancy Services
+PROCUREMENT_CATEGORIES = [
+    ("1", "Goods"),
+    ("2", "Works"),
+    ("4", "Non-consultancy Services"),
+]
+
+# Civil Works, Health/Medicines, Info and Comm Tech
+SECTORS = [
+    ("6", "Civil Works"),
+    ("13", "Health/Medicines"),
+    ("14", "Info and Comm Tech"),
+]
+
+# City filter uses city name strings on PPRA (not numeric ids).
+CITIES = [
+    c.strip()
+    for c in os.getenv("CITIES", "Islamabad,Lahore,Karachi").split(",")
+    if c.strip()
+]
+
+# Digest buckets = sectors (same order as SECTORS). Override with niche ids:
+# civil_works, health, ict
+_ENABLED_NICHES_RAW = os.getenv("ENABLED_NICHES", "civil_works,health,ict")
+ENABLED_NICHES = [n.strip() for n in _ENABLED_NICHES_RAW.split(",") if n.strip()]
+
+MAX_DIGEST_POSTS_PER_DAY = int(os.getenv("MAX_DIGEST_POSTS_PER_DAY", "3"))
+DIGEST_MAX_ITEMS = int(os.getenv("DIGEST_MAX_ITEMS", "8"))
+
+SPOTLIGHT_ENABLED = os.getenv("SPOTLIGHT_ENABLED", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+
+POST_DELAY_SECONDS = int(os.getenv("POST_DELAY_SECONDS", "3600"))
 RUN_TIME = os.getenv("RUN_TIME", "09:00")

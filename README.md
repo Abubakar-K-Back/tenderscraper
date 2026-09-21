@@ -1,43 +1,53 @@
 # scrapperr
 
-Scrapes active tenders from the PPRA e-PMS portal
-(https://epms.ppra.gov.pk/public/tenders/active-tenders) and posts new ones
-as branded image posts to a Facebook Page via the Graph API. Designed to
-run once a day, spaced out over the day rather than all at once.
+Scrapes active tenders from the PPRA e-PMS portal with official filters
+(https://epms.ppra.gov.pk/public/tenders/active-tenders), then posts
+**sector digests + one spotlight** to a Facebook Page via the Graph API.
+
+## Filters (locked in `config.py`)
+
+| Filter | Values |
+|--------|--------|
+| `tender_type` | `1` (Tender Notice) |
+| Procurement category | Goods (`1`), Works (`2`), Non-consultancy Services (`4`) |
+| Sector | Civil Works (`6`), Health/Medicines (`13`), Info and Comm Tech (`14`) |
+| City | Islamabad, Lahore, Karachi |
+
+Each category × sector × city combo is requested separately (PPRA accepts one
+value per field). Results are deduped by tender number.
 
 ## How it works
 
-1. `scraper.py` fetches the first N listing pages (newest tenders appear on
-   page 1) and parses each row into a dict.
-2. `storage.py` keeps a local SQLite DB (`data/tenders.db`) of tender
-   numbers already posted, so the same tender is never posted twice.
-3. `main.py` scrapes, diffs against the DB, and for each new tender:
-   - fetches that tender's detail page (`scraper.fetch_tender_detail`) for
-     fields not on the listing page (Bid Security, Bid Validity, Bidding
-     Method, Procurement Category, ...)
-   - generates a branded image card (`image_generator.py`, via Pillow):
-     Project title, Department, Submission Deadline, Bid Security, Bid
-     Validity, and a Category pill — nothing else
-   - posts the image to the Facebook Page's `/photos` endpoint, with a
-     formal text notice (`facebook_poster.format_tender_message`) as the
-     caption
-   - waits `POST_DELAY_SECONDS` before the next one
-4. **First run is special**: since the DB starts empty, the first run would
-   otherwise try to post every scraped tender at once. Instead, it just
-   seeds the DB with what's currently on the site and posts nothing. From
-   the next run onward, only genuinely new tenders get posted.
+1. `scraper.py` fetches filtered listing pages and parses each row.
+2. `storage.py` keeps `data/tenders.db` so the same tender is never posted twice.
+3. `main.py` diffs against the DB, fetches detail pages, then:
+   - groups new tenders by **sector** (`niches.py`)
+   - posts up to `MAX_DIGEST_POSTS_PER_DAY` digest images + captions
+   - posts **one spotlight** single-tender card
+   - waits `POST_DELAY_SECONDS` between posts
+4. **First run** seeds the DB with current filtered listings and posts nothing.
+
+### What we scrape from the detail page (for posts)
+
+Used: Organization Name, City, Procurement Category, Sector, Status,
+Closing Date & Time, Bid Security, Bid Validity, Procurement Procedure,
+title, detail URL.
+
+Skipped on the Page (noise): full office address, corrigendum history body,
+workflow type, contact phone.
 
 ## Project layout
 
 | File                 | Purpose                                                |
 |-----------------------|---------------------------------------------------------|
-| `scraper.py`          | Fetches/parses the listing pages and tender detail pages |
+| `scraper.py`          | Filtered listing + detail fetch/parse                   |
 | `storage.py`           | SQLite dedup tracking                                   |
-| `facebook_poster.py`   | Builds the caption text, shortens links, posts to FB    |
-| `image_generator.py`   | Renders the branded tender image (Pillow)               |
-| `main.py`              | Orchestrates scrape → diff → generate → post            |
+| `niches.py`            | Sector digests + spotlight scoring                      |
+| `facebook_poster.py`   | Digest/spotlight captions, TinyURL, Graph API posts     |
+| `image_generator.py`   | Digest list cards + single-tender spotlight images      |
+| `main.py`              | Orchestrates scrape → group → digest → spotlight        |
 | `scheduler.py`         | Runs `main.run()` once a day inside the Docker container |
-| `config.py`            | Reads `.env` / defaults                                 |
+| `config.py`            | Reads `.env` / filter defaults                          |
 
 ## Setup
 
@@ -94,25 +104,28 @@ works without review while the app is in Development mode.
 
 ### Config (`.env`)
 
-| Variable               | Meaning                                              |
-|-------------------------|-------------------------------------------------------|
-| `FB_PAGE_ID`            | Your Facebook Page's numeric ID                      |
-| `FB_PAGE_ACCESS_TOKEN`  | Long-lived Page access token (see above)             |
-| `PAGES_TO_SCRAPE`       | Listing pages to scrape per run (50 tenders/page)    |
-| `MAX_POSTS_PER_RUN`     | Safety cap on posts per run                          |
-| `POST_DELAY_SECONDS`    | Delay between consecutive FB posts (default: 1200 = 20 min) |
-| `RUN_TIME`              | Daily run time, `HH:MM` container-local time (Docker scheduler only) |
+| Variable                   | Meaning                                              |
+|-----------------------------|-------------------------------------------------------|
+| `FB_PAGE_ID`                | Your Facebook Page's numeric ID                      |
+| `FB_PAGE_ACCESS_TOKEN`      | Long-lived Page access token (see above)             |
+| `PAGES_TO_SCRAPE`           | Pages per category×sector×city combo                 |
+| `TENDER_TYPE`               | PPRA tender type (`1` = Tender Notice)               |
+| `CITIES`                    | Comma-separated city names                           |
+| `ENABLED_NICHES`            | Digest niches: `civil_works,health,ict`              |
+| `MAX_DIGEST_POSTS_PER_DAY`  | Max sector digest posts per run (default 3)          |
+| `DIGEST_MAX_ITEMS`          | Rows on the digest image (caption lists all)         |
+| `SPOTLIGHT_ENABLED`         | `true`/`false` — one shareable single-tender card    |
+| `POST_DELAY_SECONDS`        | Delay between FB posts (default 3600 = 1 hour)       |
+| `RUN_TIME`                  | Daily run time, `HH:MM` container-local time (Docker)|
 
-> **Why the 20-minute delay?** A brand-new Page with no followers can get
-> its posts silently hidden by Facebook's spam/integrity system if you
-> publish many near-identical items in quick succession. Spacing posts
-> minutes apart looks far more natural, and fits a "tender alert" page
-> better than a burst-post anyway.
->
-> More generally: a brand-new, zero-follower Page posting only via API can
-> have its posts suppressed from the public feed even while Facebook's own
-> API reports them as `is_published: true`. Getting a handful of real
-> people to like/follow the Page is the actual fix — not a code change.
+Procurement categories and sectors are fixed in `config.py` (Goods/Works/
+Non-consultancy Services × Civil Works/Health/ICT). Change them there if you
+expand the shortlist.
+
+> **Why digests + one spotlight?** Facebook suppresses Pages that blast many
+> near-identical API photos. A few useful sector digests plus one spotlight
+> card look like a real alert page and invite comments/shares. Getting real
+> followers still matters for distribution.
 
 ## Usage
 
