@@ -1,5 +1,5 @@
-import logging
 import json
+import logging
 import re
 from datetime import datetime
 
@@ -8,9 +8,6 @@ import requests
 import config
 
 logger = logging.getLogger(__name__)
-
-MAX_TITLE_LENGTH = 110
-MAX_DIGEST_TITLE = 88
 
 
 class FacebookPostError(Exception):
@@ -66,7 +63,7 @@ def _short_deadline(raw: str) -> str:
     if not parsed:
         return text
 
-    day = parsed.day  # no leading zero
+    day = parsed.day
     mon = parsed.strftime("%b")
     short = f"{day} {mon}"
 
@@ -90,33 +87,6 @@ def _short_deadline(raw: str) -> str:
     return short
 
 
-def shorten_url(url: str, attempts: int = 2) -> str:
-    """Kept for compatibility; captions use the original PPRA URL (more trusted)."""
-    if not url:
-        return url
-    for _attempt in range(attempts):
-        try:
-            response = requests.get(
-                "https://tinyurl.com/api-create.php",
-                params={"url": url},
-                timeout=10,
-            )
-            short = response.text.strip()
-            if response.status_code == 200 and short.startswith("http"):
-                return short
-        except requests.RequestException:
-            pass
-    return url
-
-
-def _status_label(status_raw: str) -> str:
-    if "Corrigendum" in (status_raw or ""):
-        return "Corrigendum"
-    if "Cancelled" in (status_raw or ""):
-        return "Cancelled"
-    return "Active"
-
-
 def extract_fields(tender: dict) -> dict:
     """Display fields from listing + detail page."""
     detail = tender.get("detail_fields") or {}
@@ -126,17 +96,7 @@ def extract_fields(tender: dict) -> dict:
         or tender.get("city")
         or tender.get("location", "").split(" - ")[0].strip()
     )
-
     department = detail.get("Organization Name") or tender.get("organization", "")
-
-    category = (
-        detail.get("Procurement Category")
-        or tender.get("procurement_category")
-        or tender.get("category", "")
-        or ""
-    )
-
-    sector = detail.get("Sector") or tender.get("sector") or ""
 
     deadline = detail.get("Closing Date & Time") or ""
     if not deadline:
@@ -145,75 +105,17 @@ def extract_fields(tender: dict) -> dict:
             deadline = f"{deadline} at {tender['closing_time']}".strip()
 
     bid_security = _clean_money(detail.get("Bid Security", ""))
-    bid_validity = (detail.get("Bid Validity") or "").strip()
-    bidding_method = (
-        detail.get("Procurement Procedure") or detail.get("Method") or ""
-    ).strip()
 
     return {
         "city": city,
         "department": department,
-        "category": category,
-        "sector": sector,
-        "status_label": _status_label(tender.get("status", "")),
         "deadline": deadline,
         "bid_security": bid_security or "Not listed",
-        "bid_validity": bid_validity or "Not listed",
-        "bidding_method": bidding_method or "Not listed",
     }
 
 
-def format_tender_message(tender: dict, *, spotlight: bool = False) -> str:
-    """Mobile-first caption: hook in the first 2 lines (before 'See more')."""
-    f = extract_fields(tender)
-    title = _truncate((tender.get("title") or "").strip(), MAX_TITLE_LENGTH)
-    link = tender.get("detail_url") or ""
-    city = f["city"] or "Pakistan"
-    sector = f["sector"] or f["category"] or "Tender"
-
-    hook = f"{'Spotlight · ' if spotlight else ''}{city} · {sector}"
-    closes = _short_deadline(f["deadline"])
-    lines = [
-        hook,
-        f"Closes {closes}" if closes else "",
-        "",
-        title,
-        "",
-        f["department"],
-    ]
-
-    facts = []
-    if f["bid_security"] and f["bid_security"] != "Not listed":
-        facts.append(f"Bid security {f['bid_security']}")
-    # Bid validity stays on the image only — skip in caption.
-    if f["status_label"] == "Corrigendum":
-        facts.append("Updated notice (corrigendum)")
-    if facts:
-        lines.append(" · ".join(facts))
-
-    lines.extend(["", "Apply here:", link] if link else [""])
-    lines.extend(
-        [
-            "",
-            "Follow for Islamabad, Lahore and Karachi tenders.",
-            "Share with someone who bids this week.",
-        ]
-    )
-    return "\n".join(line for line in lines if line is not None).replace("\n\n\n", "\n\n")
-
-
 def format_digest_message(niche_label: str, tenders: list) -> str:
-    """Caption style locked to the Page format users liked:
-
-    Health/Medicines · 21 Sep 2026
-    21 new tenders · Islamabad, Lahore, Karachi
-
-    1. Title
-    Organization
-
-    City · closes 3 Oct, 10am
-    https://...
-    """
+    """Sector digest caption for the Facebook feed."""
     today = datetime.now().strftime("%d %b %Y")
     cities = []
     for tender in tenders:
@@ -230,7 +132,6 @@ def format_digest_message(niche_label: str, tenders: list) -> str:
 
     for i, tender in enumerate(tenders, start=1):
         f = extract_fields(tender)
-        # Keep titles readable but allow the longer ones from the live Page posts.
         title = _truncate((tender.get("title") or "").strip(), 120)
         city = f["city"] or ""
         closes = _short_deadline(f["deadline"])
@@ -255,38 +156,8 @@ def format_digest_message(niche_label: str, tenders: list) -> str:
     return "\n".join(lines)
 
 
-def post_to_page(message: str) -> dict:
-    if not config.FB_PAGE_ID or not config.FB_PAGE_ACCESS_TOKEN:
-        raise FacebookPostError(
-            "FB_PAGE_ID / FB_PAGE_ACCESS_TOKEN not configured. See .env.example."
-        )
-
-    url = f"https://graph.facebook.com/{config.FB_GRAPH_API_VERSION}/{config.FB_PAGE_ID}/feed"
-    payload = {
-        "message": message,
-        "access_token": config.FB_PAGE_ACCESS_TOKEN,
-    }
-
-    response = requests.post(url, data=payload, timeout=30)
-    data = response.json()
-
-    if response.status_code != 200 or "error" in data:
-        error = data.get("error", {})
-        raise FacebookPostError(
-            f"Facebook API error ({response.status_code}): "
-            f"{error.get('message', response.text)}"
-        )
-
-    logger.info("Posted to Facebook, post id: %s", data.get("id"))
-    return data
-
-
 def post_photo_to_page(image_path: str, caption: str) -> dict:
-    """Upload photo then publish it as a Page feed post (not Photos-only).
-
-    Direct /photos posts often land in the album without showing under Posts.
-    Unpublished upload + /feed attached_media creates a normal timeline post.
-    """
+    """Upload photo then publish as a Page feed post (not Photos-only)."""
     if not config.FB_PAGE_ID or not config.FB_PAGE_ACCESS_TOKEN:
         raise FacebookPostError(
             "FB_PAGE_ID / FB_PAGE_ACCESS_TOKEN not configured. See .env.example."

@@ -1,11 +1,10 @@
-"""Digest niches aligned to PPRA Sector filters (not keyword guessing)."""
+"""Digest niches aligned to PPRA Sector filters."""
 
 from __future__ import annotations
 
 import logging
 import re
 from collections import defaultdict
-from datetime import datetime
 
 import config
 
@@ -62,7 +61,6 @@ def is_meaningful_title(title: str) -> bool:
     normalized = re.sub(r"\s+", " ", raw).strip(" .-_|").lower()
     if normalized in _GENERIC_TITLES:
         return False
-    # "Invitation to Bid - ..." with almost no substance after the label
     for prefix in (
         "invitation to bid",
         "invitation for bid",
@@ -72,7 +70,9 @@ def is_meaningful_title(title: str) -> bool:
         "notice inviting tender",
         "notice inviting tenders",
     ):
-        if normalized == prefix or normalized.startswith(prefix + " ") and len(normalized) < _MIN_TITLE_LEN:
+        if normalized == prefix or (
+            normalized.startswith(prefix + " ") and len(normalized) < _MIN_TITLE_LEN
+        ):
             return False
         if normalized.startswith(prefix + " -") or normalized.startswith(prefix + " –"):
             rest = normalized.split("-", 1)[-1].split("–", 1)[-1].strip()
@@ -80,7 +80,6 @@ def is_meaningful_title(title: str) -> bool:
                 return False
     if len(normalized) < _MIN_TITLE_LEN:
         return False
-    # Mostly punctuation / numbers only
     letters = sum(1 for c in normalized if c.isalpha())
     if letters < 16:
         return False
@@ -137,93 +136,10 @@ def filter_and_group(tenders: list[dict]) -> dict[str, list[dict]]:
     return dict(grouped)
 
 
-def _parse_closing_date(tender: dict) -> datetime | None:
-    detail = tender.get("detail_fields") or {}
-    candidates = [
-        tender.get("closing_date", ""),
-        detail.get("Closing Date & Time", ""),
-        detail.get("Closing Date", ""),
-    ]
-    for raw in candidates:
-        raw = (raw or "").strip()
-        if not raw:
-            continue
-        # "October 05, 2026 at 11:00 AM" → date part only
-        if " at " in raw.lower():
-            raw = re.split(r"\s+at\s+", raw, flags=re.IGNORECASE)[0].strip()
-        for fmt in (
-            "%d-%m-%Y",
-            "%d/%m/%Y",
-            "%Y-%m-%d",
-            "%d %b %Y",
-            "%d %B %Y",
-            "%B %d, %Y",
-            "%b %d, %Y",
-        ):
-            try:
-                return datetime.strptime(raw, fmt)
-            except ValueError:
-                continue
-    return None
-
-
-def _parse_bid_security_amount(tender: dict) -> float:
-    detail = tender.get("detail_fields") or {}
-    raw = detail.get("Bid Security") or ""
-    digits = re.sub(r"[^\d.]", "", raw.replace(",", ""))
-    try:
-        return float(digits) if digits else 0.0
-    except ValueError:
-        return 0.0
-
-
-def spotlight_score(tender: dict, now: datetime | None = None) -> float:
-    now = now or datetime.now()
-    score = 0.0
-
-    closing = _parse_closing_date(tender)
-    if closing:
-        days = (closing.date() - now.date()).days
-        if 0 <= days <= 7:
-            score += 50 - days * 4
-        elif 8 <= days <= 21:
-            score += 20
-        elif days < 0:
-            score -= 30
-
-    amount = _parse_bid_security_amount(tender)
-    if amount > 0:
-        score += min(40.0, (amount ** 0.5) / 50.0)
-
-    org = (tender.get("organization") or "").lower()
-    for boost_kw in (
-        "authority",
-        "ministry",
-        "division",
-        "university",
-        "hospital",
-        "wpa",
-        "nha",
-        "wapda",
-        "nespak",
-        "caa",
-        "pia",
-    ):
-        if boost_kw in org:
-            score += 8
-            break
-
-    return score
-
-
-def pick_spotlight(tenders: list[dict]) -> dict | None:
-    """Deprecated — spotlight posts removed."""
-    return None
-
-
 def select_digest_groups(
     grouped: dict[str, list[dict]],
 ) -> list[tuple[str, list[dict]]]:
+    """Largest niche first (ENABLED_NICHES order is tie-break only)."""
     ordered_ids = enabled_niche_ids()
     candidates = [
         (nid, grouped[nid])

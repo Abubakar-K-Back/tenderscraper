@@ -2,7 +2,7 @@
 
 Scrapes active tenders from the PPRA e-PMS portal with official filters
 (https://epms.ppra.gov.pk/public/tenders/active-tenders), then posts
-**sector digests + one spotlight** to a Facebook Page via the Graph API.
+**sector digests** to a Facebook Page via the Graph API.
 
 ## Filters (locked in `config.py`)
 
@@ -21,20 +21,12 @@ value per field). Results are deduped by tender number.
 1. `scraper.py` fetches filtered listing pages and parses each row.
 2. `storage.py` keeps `data/tenders.db` so the same tender is never posted twice.
 3. `main.py` diffs against the DB, fetches detail pages, then:
+   - skips generic/short titles (e.g. "Invitation to Bid")
    - groups new tenders by **sector** (`niches.py`)
-   - posts up to `MAX_DIGEST_POSTS_PER_DAY` digest images + captions
-   - posts **one spotlight** single-tender card
+   - posts up to `MAX_DIGEST_POSTS_PER_DAY` digests (**largest niche first**)
+   - image shows `DIGEST_MAX_ITEMS` cards; caption lists up to `DIGEST_CAPTION_MAX`
    - waits `POST_DELAY_SECONDS` between posts
 4. **First run** seeds the DB with current filtered listings and posts nothing.
-
-### What we scrape from the detail page (for posts)
-
-Used: Organization Name, City, Procurement Category, Sector, Status,
-Closing Date & Time, Bid Security, Bid Validity, Procurement Procedure,
-title, detail URL.
-
-Skipped on the Page (noise): full office address, corrigendum history body,
-workflow type, contact phone.
 
 ## Project layout
 
@@ -42,10 +34,10 @@ workflow type, contact phone.
 |-----------------------|---------------------------------------------------------|
 | `scraper.py`          | Filtered listing + detail fetch/parse                   |
 | `storage.py`           | SQLite dedup tracking                                   |
-| `niches.py`            | Sector digests + spotlight scoring                      |
-| `facebook_poster.py`   | Digest/spotlight captions, TinyURL, Graph API posts     |
-| `image_generator.py`   | Digest list cards + single-tender spotlight images      |
-| `main.py`              | Orchestrates scrape → group → digest → spotlight        |
+| `niches.py`            | Sector grouping + title quality filter                  |
+| `facebook_poster.py`   | Digest captions + Graph API feed posts                  |
+| `image_generator.py`   | Digest list cards (rotating themes)                     |
+| `main.py`              | Orchestrates scrape → group → digest posts              |
 | `scheduler.py`         | Runs `main.run()` once a day inside the Docker container |
 | `config.py`            | Reads `.env` / filter defaults                          |
 
@@ -97,11 +89,6 @@ You need a **long-lived Page Access Token** with `pages_manage_posts` and
    and `id` — that's your `FB_PAGE_ID` and `FB_PAGE_ACCESS_TOKEN`.
 6. Put those values in `.env`.
 
-Note: your Facebook app will need App Review for `pages_manage_posts` if
-you're posting to a page you don't personally administer. For your own
-page while you're listed as an admin/developer on the app, it generally
-works without review while the app is in Development mode.
-
 ### Config (`.env`)
 
 | Variable                   | Meaning                                              |
@@ -113,31 +100,18 @@ works without review while the app is in Development mode.
 | `CITIES`                    | Comma-separated city names                           |
 | `ENABLED_NICHES`            | Digest niches: `civil_works,health,ict`              |
 | `MAX_DIGEST_POSTS_PER_DAY`  | Max sector digest posts per run (default 3)          |
-| `DIGEST_MAX_ITEMS`          | Rows on the digest image (caption lists all)         |
-| `SPOTLIGHT_ENABLED`         | `true`/`false` — one shareable single-tender card    |
-| `POST_DELAY_SECONDS`        | Delay between FB posts (default 3600 = 1 hour)       |
+| `DIGEST_MAX_ITEMS`          | Cards on the digest image (default 4)                |
+| `DIGEST_CAPTION_MAX`        | Max tenders listed in caption (default 10)           |
+| `POST_DELAY_SECONDS`        | Delay between FB posts (e.g. 28800 = 8 hours)        |
 | `RUN_TIME`                  | Daily run time, `HH:MM` container-local time (Docker)|
 
-Procurement categories and sectors are fixed in `config.py` (Goods/Works/
-Non-consultancy Services × Civil Works/Health/ICT). Change them there if you
-expand the shortlist.
-
-> **Why digests + one spotlight?** Facebook suppresses Pages that blast many
-> near-identical API photos. A few useful sector digests plus one spotlight
-> card look like a real alert page and invite comments/shares. Getting real
-> followers still matters for distribution.
+Procurement categories and sectors are fixed in `config.py`.
 
 ## Usage
 
 ```bash
-# Dry run: scrape, generate preview images (data/preview_<tender_no>.png),
-# print what would be posted — no posting, no DB writes
 python main.py --dry-run
-
-# Real run
 python main.py
-
-# Override how many listing pages to scrape
 python main.py --pages 3
 ```
 
@@ -145,31 +119,19 @@ python main.py --pages 3
 
 ```bash
 cp .env.example .env   # fill in FB_PAGE_ID / FB_PAGE_ACCESS_TOKEN
-
-# Start the self-scheduling container (runs daily at RUN_TIME, default 09:00
-# Asia/Karachi time; keeps running in the background)
 docker compose up -d
-
-docker compose logs -f     # watch it
-docker compose down        # stop it
-
-# After changing any code, rebuild before running again —
-# `docker compose run`/`up` does NOT auto-rebuild on its own:
-docker compose build
-
-# One-off manual runs
+docker compose logs -f
+docker compose down
+docker compose build   # after code changes
 docker compose run --rm tender-poster python main.py --dry-run
 docker compose run --rm tender-poster python main.py
 ```
 
-The SQLite dedup DB is bind-mounted to `./data/tenders.db` on the host, so it
-persists across container rebuilds/restarts. Credentials come from `.env` via
-`env_file` in `docker-compose.yml` — they are never baked into the image.
+The SQLite dedup DB is bind-mounted to `./data/tenders.db`. Credentials come
+from `.env` via `env_file` in `docker-compose.yml`.
 
 ## Scheduling (without Docker)
 
-If you'd rather not use Docker, run this daily via cron instead:
-
 ```
-0 9 * * * cd /home/abubakar-khalid/scrapperr && .venv/bin/python main.py >> data/run.log 2>&1
+0 9 * * * cd /path/to/tenderscraper && .venv/bin/python main.py >> data/run.log 2>&1
 ```
