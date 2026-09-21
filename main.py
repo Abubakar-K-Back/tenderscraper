@@ -133,13 +133,14 @@ def run(dry_run: bool = False, pages: int = None):
         tmp = Path(tmp_dir)
 
         for niche_id, group in digest_groups:
-            # Image shows a short scannable set; caption lists the full niche group.
             shown = group[: config.DIGEST_MAX_ITEMS]
-            if len(group) > len(shown):
+            caption_tenders = group[: config.DIGEST_CAPTION_MAX]
+            if len(group) > len(caption_tenders):
                 logger.info(
-                    "%s: image shows %d, caption lists all %d",
+                    "%s: image %d, caption %d of %d (rest marked seen)",
                     niche_id,
                     len(shown),
+                    len(caption_tenders),
                     len(group),
                 )
 
@@ -148,7 +149,12 @@ def run(dry_run: bool = False, pages: int = None):
             image_generator.generate_digest_image(
                 label, shown, image_path, niche_id=niche_id
             )
-            message = facebook_poster.format_digest_message(label, group)
+            message = facebook_poster.format_digest_message(label, caption_tenders)
+            if len(group) > len(caption_tenders):
+                message += (
+                    f"\n+{len(group) - len(caption_tenders)} more on PPRA today "
+                    "(not listed here)."
+                )
 
             ok = _post_photo(
                 image_path,

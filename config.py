@@ -52,8 +52,10 @@ _ENABLED_NICHES_RAW = os.getenv("ENABLED_NICHES", "civil_works,health,ict")
 ENABLED_NICHES = [n.strip() for n in _ENABLED_NICHES_RAW.split(",") if n.strip()]
 
 MAX_DIGEST_POSTS_PER_DAY = int(os.getenv("MAX_DIGEST_POSTS_PER_DAY", "3"))
-# Hard cap per digest image + caption (keeps cards readable on mobile).
-DIGEST_MAX_ITEMS = int(os.getenv("DIGEST_MAX_ITEMS", "5"))
+# Cards on the digest image (aim for a readable set — at least 4 when available).
+DIGEST_MAX_ITEMS = int(os.getenv("DIGEST_MAX_ITEMS", "4"))
+# Max tenders listed in the Facebook caption.
+DIGEST_CAPTION_MAX = int(os.getenv("DIGEST_CAPTION_MAX", "10"))
 
 POST_DELAY_SECONDS = int(os.getenv("POST_DELAY_SECONDS", "3600"))
 RUN_TIME = os.getenv("RUN_TIME", "09:00")
