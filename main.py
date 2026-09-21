@@ -133,17 +133,14 @@ def run(dry_run: bool = False, pages: int = None):
         tmp = Path(tmp_dir)
 
         for niche_id, group in digest_groups:
-            # Cap what goes on the image/caption; mark the whole niche group seen
-            # so a 100+ backlog never floods one post.
+            # Image shows a short scannable set; caption lists the full niche group.
             shown = group[: config.DIGEST_MAX_ITEMS]
-            overflow = len(group) - len(shown)
-            if overflow:
+            if len(group) > len(shown):
                 logger.info(
-                    "%s: posting %d of %d tenders (%d marked seen without listing)",
+                    "%s: image shows %d, caption lists all %d",
                     niche_id,
                     len(shown),
                     len(group),
-                    overflow,
                 )
 
             label = niches.niche_label(niche_id)
@@ -151,7 +148,7 @@ def run(dry_run: bool = False, pages: int = None):
             image_generator.generate_digest_image(
                 label, shown, image_path, niche_id=niche_id
             )
-            message = facebook_poster.format_digest_message(label, shown)
+            message = facebook_poster.format_digest_message(label, group)
 
             ok = _post_photo(
                 image_path,

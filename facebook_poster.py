@@ -203,14 +203,24 @@ def format_tender_message(tender: dict, *, spotlight: bool = False) -> str:
 
 
 def format_digest_message(niche_label: str, tenders: list) -> str:
-    """Scannable digest: one tender = a few short lines, then the apply link."""
+    """Caption style locked to the Page format users liked:
+
+    Health/Medicines · 21 Sep 2026
+    21 new tenders · Islamabad, Lahore, Karachi
+
+    1. Title
+    Organization
+
+    City · closes 3 Oct, 10am
+    https://...
+    """
     today = datetime.now().strftime("%d %b %Y")
     cities = []
     for tender in tenders:
         city = extract_fields(tender)["city"]
         if city and city not in cities:
             cities.append(city)
-    city_bit = ", ".join(cities) if cities else "Islamabad, Lahore & Karachi"
+    city_bit = ", ".join(cities) if cities else "Islamabad, Lahore, Karachi"
 
     lines = [
         f"{niche_label} · {today}",
@@ -220,18 +230,20 @@ def format_digest_message(niche_label: str, tenders: list) -> str:
 
     for i, tender in enumerate(tenders, start=1):
         f = extract_fields(tender)
-        title = _truncate((tender.get("title") or "").strip(), MAX_DIGEST_TITLE)
+        # Keep titles readable but allow the longer ones from the live Page posts.
+        title = _truncate((tender.get("title") or "").strip(), 120)
         city = f["city"] or ""
         closes = _short_deadline(f["deadline"])
+
         lines.append(f"{i}. {title}")
         if f["department"]:
-            lines.append(f"   {f['department']}")
-            lines.append("")
-        meta_parts = [p for p in (city, f"closes {closes}" if closes else "") if p]
-        if meta_parts:
-            lines.append("   " + " · ".join(meta_parts))
+            lines.append(f["department"])
+        lines.append("")
+        meta = " · ".join(p for p in (city, f"closes {closes}" if closes else "") if p)
+        if meta:
+            lines.append(meta)
         if tender.get("detail_url"):
-            lines.append(f"   {tender['detail_url']}")
+            lines.append(tender["detail_url"])
         lines.append("")
 
     lines.extend(
